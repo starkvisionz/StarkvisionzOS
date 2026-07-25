@@ -1,6 +1,5 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
-import { SimTag } from "../components/SimTag";
 
 export function LoopView({ vals }: { vals: Vals }) {
   return (
@@ -8,10 +7,16 @@ export function LoopView({ vals }: { vals: Vals }) {
       <div style={css("max-width:780px;margin:0 auto")}>
         <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}>
           <h3 style={css("margin:0")}>Multi-agent loop</h3>
-          <span style={css("font-size:12px;color:var(--color-neutral-500)")}>agents review and improve each other until they converge</span>
-          <SimTag />
+          <span style={css("font-size:12px;color:var(--color-neutral-500)")}>real Claude agents review and improve each other until they converge</span>
         </div>
-        <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:600px;margin:0 0 18px")}>An author agent drafts, reviewers score and critique, and the best notes fold into the next round. Every round is logged as an event; the loop stops when the score clears the target.</p>
+        <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:600px;margin:0 0 18px")}>Claude Opus drafts an answer, two reviewer lenses (correctness and completeness) score and critique it, and the notes fold into the next draft. Every converged loop is logged as an event; the loop stops when the lowest review score clears the target.</p>
+
+        {vals.loopError && (
+          <div style={css("display:flex;align-items:center;gap:10px;padding:11px 14px;margin-bottom:16px;border:1px solid color-mix(in srgb,#d68f9a 40%,transparent);border-radius:var(--radius-md);background:color-mix(in srgb,#d68f9a 12%,transparent);color:#e5b0b8;font-size:12.5px")}>
+            <i className="ph ph-warning-octagon" style={css("font-size:16px;flex:none")} />
+            <span>{vals.loopError}</span>
+          </div>
+        )}
 
         <div className="card elev-sm" style={css("gap:14px;padding:15px 16px;margin-bottom:22px")}>
           <div className="field">
@@ -107,7 +112,7 @@ export function LoopView({ vals }: { vals: Vals }) {
           <div style={css("display:flex;flex-direction:column;align-items:center;gap:10px;padding:56px 20px;text-align:center;border:1px dashed var(--color-divider);border-radius:var(--radius-lg)")}>
             <i className="ph ph-arrows-clockwise" style={css("font-size:34px;color:var(--color-accent-300)")} />
             <div style={css("font-size:14px;color:var(--color-neutral-300)")}>No loop running yet</div>
-            <div style={css("font-size:12.5px;color:var(--color-neutral-600);max-width:340px")}>Set a task and hit Run loop. Forge drafts, Claude and Hermes review and score, and the draft improves each round.</div>
+            <div style={css("font-size:12.5px;color:var(--color-neutral-600);max-width:340px")}>Set a task and hit Run loop. Claude Opus drafts, two reviewer lenses score and critique, and the draft improves each round.</div>
           </div>
         )}
       </div>

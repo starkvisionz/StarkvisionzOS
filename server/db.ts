@@ -61,10 +61,49 @@ db.exec(`
     created_at    TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS settings (
+    k TEXT PRIMARY KEY,
+    v TEXT NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_events_seq ON events(seq DESC);
   CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
 `);
+
+export interface AppSettings {
+  sysPrompt: string;
+  aboutText: string;
+  model: string;
+  tools: Record<string, boolean>;
+  plugins: Record<string, boolean>;
+  guards: Record<string, boolean>;
+  mem: Record<string, boolean>;
+  appear: Record<string, boolean>;
+  stake: string;
+  cap: number;
+  capAction: string;
+  density: string;
+  half: number;
+}
+
+export const SETTINGS_DEFAULTS: AppSettings = {
+  sysPrompt:
+    "You are Claude, an agent operating inside Starkvisionz OS — an event-sourced AI workspace.\n\n- Read the shared project context before acting; never ask the human to re-explain the project.\n- Every action you take is logged as an immutable event. Cite evidence (commits, test runs, decisions).\n- Break work into tasks and estimate cost per step.\n- Any action that touches production requires explicit human approval first.",
+  aboutText:
+    "Eric Stark — project-controls background (WBS, earned value, variance). Prefers concise, decisive answers with the cost and the tradeoff stated up front.",
+  model: "claude-opus-5",
+  tools: { web: true, code: true, files: true, github: true, coolify: false, terminal: false, postgres: true },
+  plugins: { linear: true, slack: true, sentry: false, figma: false, gitguard: true, ledger: false },
+  guards: { budget: true, prodWrite: true, secrets: true, netEgress: false },
+  mem: { autoPrune: true, contradiction: true, semantic: true, forget: false },
+  appear: { glow: true, motion: true, mono: false, thumbs: true },
+  stake: "customer",
+  cap: 50,
+  capAction: "pause",
+  density: "compact",
+  half: 30,
+};
 
 // ── domain events ──
 export interface DomainEvent {
@@ -72,7 +111,10 @@ export interface DomainEvent {
     | "session.created"
     | "session.renamed"
     | "session.deleted"
-    | "message.created";
+    | "message.created"
+    | "settings.updated"
+    | "loop.converged"
+    | "nightshift.filed";
   actor: string;
   summary: string;
   icon?: string;
@@ -117,6 +159,7 @@ const insertMessage = db.prepare(`
   VALUES (@id, @session_id, @role, @content, @model, @input_tokens, @output_tokens, @cost, @created_at)
   ON CONFLICT(id) DO NOTHING
 `);
+const upsertSettings = db.prepare(`INSERT INTO settings (k, v) VALUES ('app', @v) ON CONFLICT(k) DO UPDATE SET v = @v`);
 
 /** Apply one stored event to the projection tables. Pure with respect to the
  *  event — running it over the full log rebuilds the projection exactly. */
@@ -146,6 +189,11 @@ function applyEvent(e: StoredEvent): void {
       });
       touchSessionStmt.run(e.created_at, p.sessionId);
       break;
+    case "settings.updated":
+      upsertSettings.run({ v: JSON.stringify(p.settings) });
+      break;
+    // loop.converged / nightshift.filed are informational timeline/audit events
+    // with no projection to update.
   }
 }
 
@@ -179,9 +227,35 @@ export const emit = db.transaction((events: DomainEvent[]): StoredEvent[] => {
 export const rebuildProjections = db.transaction((): void => {
   db.prepare(`DELETE FROM messages`).run();
   db.prepare(`DELETE FROM sessions`).run();
+  db.prepare(`DELETE FROM settings`).run();
   const all = db.prepare(`SELECT * FROM events ORDER BY seq ASC`).all() as StoredEvent[];
   for (const e of all) applyEvent(e);
 });
+
+// ── settings (event-sourced projection) ──
+export function getSettings(): AppSettings {
+  const row = db.prepare(`SELECT v FROM settings WHERE k = 'app'`).get() as { v: string } | undefined;
+  if (!row) return { ...SETTINGS_DEFAULTS };
+  try {
+    return { ...SETTINGS_DEFAULTS, ...(JSON.parse(row.v) as Partial<AppSettings>) };
+  } catch {
+    return { ...SETTINGS_DEFAULTS };
+  }
+}
+
+export function putSettingsCmd(partial: Partial<AppSettings>, actor: string): AppSettings {
+  const merged: AppSettings = { ...getSettings(), ...partial };
+  emit([{ type: "settings.updated", actor, summary: "Settings updated", icon: "ph ph-gear-six", dot: "var(--color-accent-300)", payload: { settings: merged } }]);
+  return merged;
+}
+
+export function logConverged(actor: string, summary: string): void {
+  emit([{ type: "loop.converged", actor, summary, icon: "ph ph-arrows-clockwise", dot: "var(--color-accent)", payload: {} }]);
+}
+
+export function logNightshift(actor: string, summary: string): void {
+  emit([{ type: "nightshift.filed", actor, summary, icon: "ph ph-moon-stars", dot: "var(--color-accent)", payload: {} }]);
+}
 
 // ── reads ──
 export interface EventRow {

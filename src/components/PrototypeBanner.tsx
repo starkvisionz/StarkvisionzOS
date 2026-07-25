@@ -10,7 +10,7 @@ export function PrototypeBanner() {
     <div className="proto-banner">
       <i className="ph-fill ph-flask" style={css("font-size:14px;color:#d6c07a;flex:none")} />
       <span>
-        <b>Prototype.</b> Chat, Timeline, Audit and Dashboard are live — real Claude API + an event-sourced store. The <b>Lab</b> views (graph, loop, nightshift, market, and the rest) are interactive simulations, each labeled <i>Simulated</i>.
+        <b>Prototype.</b> Chat, Timeline, Audit, Dashboard, Settings, the <b>Multi-agent loop</b> and <b>Nightshift</b> are live — real Claude API + an event-sourced store. The remaining <b>Lab</b> views (graph, market, replay, and the rest) are interactive simulations, each labeled <i>Simulated</i>.
       </span>
     </div>
   );

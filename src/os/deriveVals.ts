@@ -21,7 +21,6 @@ import {
   LIBRARY_ARTIFACTS,
   MARKET,
   NEG_TURNS,
-  NIGHT_FINDINGS,
   PLUGINS,
   RECOVERY_STEPS,
   REGRET_AGENTS,
@@ -261,25 +260,30 @@ export function deriveVals(s: State, a: Actions) {
   const revealed = s.loopScript.slice(0, s.loopRevealed);
   const loopRounds = revealed.map((r, i) => {
     const am = agentMeta(r.author);
+    const authorName = r.authorName || am.name;
+    const authorIcon = r.authorIcon || am.icon;
+    const authorFg = r.authorDot || am.dot;
     return {
       n: i + 1,
       showConnector: i < revealed.length - 1,
-      authorName: am.name,
-      authorIcon: am.icon,
-      authorFg: am.dot,
-      authorBg: "color-mix(in srgb," + am.dot + " 30%,var(--color-surface))",
-      authorGlow: "color-mix(in srgb," + am.dot + " 38%,transparent)",
+      authorName,
+      authorIcon,
+      authorFg,
+      authorBg: "color-mix(in srgb," + authorFg + " 30%,var(--color-surface))",
+      authorGlow: "color-mix(in srgb," + authorFg + " 38%,transparent)",
       draft: r.draft,
       score: r.score,
       scoreColor: scoreColor(r.score),
       reviews: r.reviews.map((rv) => {
         const rm = agentMeta(rv.agent);
+        const name = rv.name || rm.name;
+        const fg = rv.dot || rm.dot;
         return {
-          name: rm.name,
-          icon: rm.icon,
-          fg: rm.dot,
-          bg: "color-mix(in srgb," + rm.dot + " 30%,var(--color-surface))",
-          glow: "color-mix(in srgb," + rm.dot + " 38%,transparent)",
+          name,
+          icon: rv.icon || rm.icon,
+          fg,
+          bg: "color-mix(in srgb," + fg + " 30%,var(--color-surface))",
+          glow: "color-mix(in srgb," + fg + " 38%,transparent)",
           score: rv.score,
           scoreColor: scoreColor(rv.score),
           note: rv.note,
@@ -292,13 +296,10 @@ export function deriveVals(s: State, a: Actions) {
   const loopScores = revealed.map((r) => ({ v: r.score, color: scoreColor(r.score) }));
   const bestScore = revealed.length ? revealed[revealed.length - 1].score : 0;
   const loopParticipants = [
-    { role: "Author", id: "forge" },
-    { role: "Reviewer", id: "claude" },
-    { role: "Reviewer", id: "hermes" },
-  ].map((p) => {
-    const m = agentMeta(p.id);
-    return { role: p.role, name: m.name, icon: m.icon, dot: m.dot, bg: "color-mix(in srgb," + m.dot + " 30%,var(--color-surface))" };
-  });
+    { role: "Author", name: "Claude Opus", icon: "ph ph-sparkle", dot: "var(--color-accent)" },
+    { role: "Reviewer · correctness", name: "Claude Haiku", icon: "ph ph-scales", dot: "var(--color-accent-400)" },
+    { role: "Reviewer · completeness", name: "Claude Haiku", icon: "ph ph-scales", dot: "var(--color-accent-400)" },
+  ].map((p) => ({ role: p.role, name: p.name, icon: p.icon, dot: p.dot, bg: "color-mix(in srgb," + p.dot + " 30%,var(--color-surface))" }));
   const loopStatus = s.loopRunning ? "Running" : s.loopDone ? "Converged" : revealed.length ? "Stopped" : "Idle";
 
   // ── project + repo selectors ──
@@ -435,7 +436,7 @@ export function deriveVals(s: State, a: Actions) {
   const attention = [
     { label: "Stale claims below threshold", sub: "confidence has decayed past 60%", n: CLAIMS.filter((c) => (s.claimConf[c.id] ?? c.conf) < 60).length, icon: "ph-fill ph-warning-circle", color: "#d68f9a", v: "truth" as const },
     { label: "Open blind spots", sub: "gaps agents keep filling with guesses", n: BLIND_SPOTS.length - BLIND_SPOTS.filter((b) => s.closedSpots[b.id]).length, icon: "ph ph-question", color: "#d6c07a", v: "blind" as const },
-    { label: "Nightshift items awaiting approval", sub: "drafted, not executed", n: s.nightRevealed > 0 ? NIGHT_FINDINGS.filter((f) => f.approve).length : 0, icon: "ph ph-moon-stars", color: "var(--color-accent)", v: "night" as const },
+    { label: "Nightshift items awaiting approval", sub: "drafted, not executed", n: s.nightReal.filter((f) => f.kind === "drafted").length, icon: "ph ph-moon-stars", color: "var(--color-accent)", v: "night" as const },
     { label: "Decisions with high regret", sub: "confident calls that did not hold", n: REGRET_ROWS.filter((r) => r.good === false).length, icon: "ph ph-scales", color: "#d68f9a", v: "regret" as const },
   ].map((at) => ({ ...at, bg: "color-mix(in srgb," + at.color + " 18%,transparent)", onClick: () => a.switchView(at.v) }));
 
@@ -548,25 +549,31 @@ export function deriveVals(s: State, a: Actions) {
   const truthAvg = Math.round(confs.reduce((x, y) => x + y, 0) / confs.length) + "%";
   const truthStale = confs.filter((x) => x < 60).length;
 
-  // ── nightshift ──
-  const nightFindings = NIGHT_FINDINGS.slice(0, s.nightRevealed).map((f) => ({
+  // ── nightshift (real Claude-generated brief from the event log) ──
+  const nightIcon = (kind: string) =>
+    kind === "answered" ? "ph ph-check-circle" : kind === "pruned" ? "ph ph-scissors" : kind === "drafted" ? "ph ph-pencil-simple" : "ph ph-eye";
+  const nightRealFindings = s.nightReal.slice(0, s.nightRevealed).map((f) => ({
     title: f.title,
     body: f.body,
     kind: f.kind,
-    at: f.at,
-    icon: f.icon,
-    needsApproval: !!f.approve,
+    at: "tonight",
+    icon: nightIcon(f.kind),
+    needsApproval: f.kind === "drafted",
     color: f.kind === "watch" ? "#d6c07a" : "var(--color-accent)",
     bg: f.kind === "watch" ? "color-mix(in srgb,#d6c07a 18%,transparent)" : "color-mix(in srgb,var(--color-accent) 20%,transparent)",
-    border: f.approve ? "var(--color-accent-500)" : "var(--color-divider)",
-    glow: f.approve ? "0 0 20px color-mix(in srgb,var(--color-accent) 14%,transparent)" : "none",
+    border: f.kind === "drafted" ? "var(--color-accent-500)" : "var(--color-divider)",
+    glow: f.kind === "drafted" ? "0 0 20px color-mix(in srgb,var(--color-accent) 14%,transparent)" : "none",
     tagClass: f.kind === "watch" ? "tag tag-neutral" : "tag tag-accent",
   }));
+  const nightFindings = nightRealFindings;
+  const nightDrafted = s.nightReal.filter((f) => f.kind === "drafted").length;
   const nightStatus = s.nightRunning
-    ? "shift in progress — agents replaying today's events"
-    : s.nightRevealed > 0
-      ? NIGHT_FINDINGS.filter((f) => f.approve).length + " item(s) need your approval · $2.60 of $4.00 used"
-      : "idle — last shift filed 4 findings at 05:20";
+    ? "shift in progress — Claude is reviewing tonight's event log"
+    : s.nightError
+      ? s.nightError
+      : s.nightReal.length > 0
+        ? nightDrafted + " drafted item(s) awaiting approval · " + s.nightReal.length + " finding(s) filed"
+        : "idle — run a shift to have Claude review the recent event log";
 
   // ── lab nav + presence + budget ──
   const labDefs = [
@@ -804,6 +811,7 @@ export function deriveVals(s: State, a: Actions) {
     hasLoop: revealed.length > 0,
     loopEmpty: revealed.length === 0,
     loopDone: s.loopDone,
+    loopError: s.loopError,
     bestScore,
     roundCount: revealed.length,
     loopStatus,
@@ -864,8 +872,9 @@ export function deriveVals(s: State, a: Actions) {
     reverifyAll: () => a.reverifyAll(),
     runNight: () => a.runNight(),
     nightFindings,
+    nightError: s.nightError,
     nightAny: s.nightRevealed > 0,
-    nightEmpty: s.nightRevealed === 0,
+    nightEmpty: s.nightRevealed === 0 && !s.nightError,
     nightBudget: "$4.00",
     nightStatus,
     nightBtnLabel: s.nightRunning ? "Working…" : s.nightRevealed > 0 ? "Run again" : "Run a shift",

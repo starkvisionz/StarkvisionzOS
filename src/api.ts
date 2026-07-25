@@ -50,6 +50,22 @@ export interface DashProjection {
   apiKey: boolean;
 }
 
+export interface AppSettingsDTO {
+  sysPrompt: string;
+  aboutText: string;
+  model: string;
+  tools: Record<string, boolean>;
+  plugins: Record<string, boolean>;
+  guards: Record<string, boolean>;
+  mem: Record<string, boolean>;
+  appear: Record<string, boolean>;
+  stake: string;
+  cap: number;
+  capAction: string;
+  density: string;
+  half: number;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -99,7 +115,57 @@ export const api = {
   messages: (id: string) => jsonFetch<{ session: ApiSession; messages: ApiMessage[] }>(`/api/sessions/${id}/messages`),
   events: (limit = 40) => jsonFetch<{ events: ApiEvent[] }>(`/api/events?limit=${limit}`),
   dashboard: () => jsonFetch<DashProjection>("/api/projections/dashboard"),
+  getSettings: () => jsonFetch<{ settings: AppSettingsDTO }>("/api/settings"),
+  putSettings: (partial: Partial<AppSettingsDTO>) =>
+    jsonFetch<{ settings: AppSettingsDTO }>("/api/settings", { method: "PUT", body: JSON.stringify(partial) }),
 };
+
+/** Generic SSE POST stream — used by the multi-agent loop and Nightshift. */
+export function streamSSE(url: string, body: unknown, on: (event: string, data: Record<string, unknown>) => void): AbortController {
+  const controller = new AbortController();
+  (async () => {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...authHeaders() },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!res.ok || !res.body) {
+        on("error", { message: res.status === 401 ? "Unauthorized — check your access token." : `${res.status} ${res.statusText}` });
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() || "";
+        for (const chunk of chunks) {
+          let event = "message";
+          let data = "";
+          for (const line of chunk.split("\n")) {
+            if (line.startsWith("event:")) event = line.slice(6).trim();
+            else if (line.startsWith("data:")) data += line.slice(5).trim();
+          }
+          if (!data) continue;
+          try {
+            on(event, JSON.parse(data));
+          } catch {
+            /* skip malformed chunk */
+          }
+        }
+      }
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      on("error", { message: err instanceof Error ? err.message : "Network error" });
+    }
+  })();
+  return controller;
+}
 
 export interface ChatCallbacks {
   onToken: (text: string) => void;
