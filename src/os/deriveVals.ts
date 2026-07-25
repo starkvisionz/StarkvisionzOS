@@ -5,7 +5,6 @@ import type { State } from "./types";
 import type { Actions } from "./useController";
 import { MODELS, PROJECTS, agentMeta } from "./data";
 import {
-  AUDIT_ROWS,
   BLIND_SPOTS,
   BRANCHES,
   CF_METRICS,
@@ -81,7 +80,11 @@ export interface AsstMsgVM {
 export type MsgVM = UserMsgVM | AsstMsgVM;
 
 export function deriveVals(s: State, a: Actions) {
-  const model = MODELS.find((m) => m.id === s.modelId) || MODELS[0];
+  const dash = s.dash;
+  const chatModels = s.chatModels;
+  const model =
+    chatModels.find((m) => m.id === s.modelId) ||
+    chatModels[0] || { id: s.modelId, name: "Claude", sub: "", dot: "var(--color-accent)" };
   const activeSession = s.sessions.find((x) => x.id === s.activeId);
 
   const navDefs = [
@@ -110,7 +113,7 @@ export function deriveVals(s: State, a: Actions) {
         .filter((x) => x.grp === label)
         .map((x) => ({
           title: x.title,
-          dot: x.dot,
+          dot: x.id === s.activeId ? "var(--color-accent)" : "var(--color-neutral-500)",
           bg: x.id === s.activeId ? "color-mix(in srgb,var(--color-accent) 16%,transparent)" : "transparent",
           shadow: x.id === s.activeId ? "inset 2px 0 0 var(--color-accent)" : "none",
           color: x.id === s.activeId ? "var(--color-neutral-100)" : "var(--color-neutral-300)",
@@ -119,7 +122,7 @@ export function deriveVals(s: State, a: Actions) {
     }))
     .filter((g) => g.items.length);
 
-  const models = MODELS.map((m) => ({
+  const models = chatModels.map((m) => ({
     name: m.name,
     sub: m.sub,
     dot: m.dot,
@@ -141,7 +144,9 @@ export function deriveVals(s: State, a: Actions) {
         files: m.files || [],
       };
     }
-    const meta = agentMeta(m.agent || "");
+    const meta = m.agentName
+      ? { name: m.agentName, sub: "", icon: m.agentIcon || "ph ph-sparkle", dot: m.agentDot || "var(--color-accent)" }
+      : agentMeta(m.agent || "");
     const blocks: BlockVM[] = (m.blocks || []).map((b): BlockVM => {
       if (b.type === "text") return { isText: true, text: b.text, streaming: !!b.streaming };
       if (b.type === "tool") return { isTool: true, name: b.name, detail: b.detail, status: b.status, lines: b.lines || [] };
@@ -158,8 +163,7 @@ export function deriveVals(s: State, a: Actions) {
       return {};
     });
     const cm = m.cost || "";
-    const tm = /(\d+)k tok/.exec(cm);
-    if (tm) tok += parseInt(tm[1]) * 1000;
+    tok += m.tokens || 0;
     return {
       isUser: false,
       isAssistant: true,
@@ -173,10 +177,7 @@ export function deriveVals(s: State, a: Actions) {
       blocks,
     };
   });
-  const totalUsd = curMsgs.reduce((acc, m) => {
-    const c = /\$([0-9.]+)/.exec(m.cost || "");
-    return acc + (c ? parseFloat(c[1]) : 0);
-  }, 0);
+  const totalUsd = curMsgs.reduce((acc, m) => acc + (m.usd || 0), 0);
 
   // live event stream
   const liveOn = s.liveOn;
@@ -246,7 +247,13 @@ export function deriveVals(s: State, a: Actions) {
     dotColor: m.connected ? "var(--color-accent)" : "var(--color-neutral-600)",
     onToggle: () => a.toggleMcp(m.id),
   }));
-  const providersList = MODELS.map((m) => ({ name: m.name, sub: m.sub, dot: m.dot, status: "Linked", tagClass: "tag-accent" }));
+  const providersList = (chatModels.length ? chatModels : MODELS).map((m) => ({
+    name: m.name,
+    sub: m.sub,
+    dot: m.dot,
+    status: s.apiKey ? "Linked" : "No key",
+    tagClass: s.apiKey ? "tag-accent" : "tag-neutral",
+  }));
 
   // multi-agent loop
   const target = 92;
@@ -408,20 +415,21 @@ export function deriveVals(s: State, a: Actions) {
   });
   const stakePolicy = stake.policy.map((p) => ({ k: p[0], v: p[1], note: p[2] }));
 
-  // ── spend chart ──
-  const spendMax = Math.max(...SPEND.map((d) => d[1] + d[2]));
-  const spendDays = SPEND.map((d, i) => {
+  // ── spend chart (real spend when the backend has data) ──
+  const spendSource: [string, number, number][] = dash ? dash.spendDays.map((x) => [x.day, x.spend, 0]) : SPEND;
+  const spendMax = Math.max(...spendSource.map((d) => d[1] + d[2]), 0.0001);
+  const spendDays = spendSource.map((d, i) => {
     const tot = d[1] + d[2];
     return {
       day: d[0],
-      amt: "$" + tot.toFixed(2),
-      h: Math.max((tot / spendMax) * 100, 6) + "%",
+      amt: tot >= 0.01 ? "$" + tot.toFixed(2) : tot > 0 ? "$" + tot.toFixed(4) : "—",
+      h: Math.max((tot / spendMax) * 100, tot > 0 ? 6 : 2) + "%",
       reworkH: d[2] > 0 ? (d[2] / tot) * 100 + "%" : "0%",
       radius: d[2] > 0 ? "0 0 4px 4px" : "4px",
-      labelColor: i === SPEND.length - 1 ? "var(--color-accent-200)" : "var(--color-neutral-600)",
+      labelColor: i === spendSource.length - 1 ? "var(--color-accent-200)" : "var(--color-neutral-600)",
     };
   });
-  const spendTotal = "$" + SPEND.reduce((acc, d) => acc + d[1] + d[2], 0).toFixed(2);
+  const spendTotal = "$" + spendSource.reduce((acc, d) => acc + d[1] + d[2], 0).toFixed(2);
 
   // ── attention panel ──
   const attention = [
@@ -587,7 +595,8 @@ export function deriveVals(s: State, a: Actions) {
     const m = agentMeta(id);
     return { name: m.name, icon: m.icon, dot: m.dot, bg: "color-mix(in srgb," + m.dot + " 30%,var(--color-surface))" };
   });
-  const bratio = 18.4 / 50;
+  const spendNum = dash ? dash.spend : 0;
+  const bratio = Math.min(spendNum / 50, 1);
   const budgetHot = bratio >= 0.9 ? "#d68f9a" : "var(--color-accent)";
 
   // ── command palette ──
@@ -864,7 +873,7 @@ export function deriveVals(s: State, a: Actions) {
     nightSpin: s.nightRunning ? "animation:ocspin 1s linear infinite" : "",
     labItems,
     presence,
-    budgetSpent: "$18.40",
+    budgetSpent: "$" + spendNum.toFixed(spendNum >= 0.01 || spendNum === 0 ? 2 : 4),
     budgetCap: "$50.00",
     budgetPct: (bratio * 100).toFixed(0) + "%",
     budgetColor: budgetHot,
@@ -1028,8 +1037,11 @@ export function deriveVals(s: State, a: Actions) {
       { icon: "ph ph-brain", label: "cross-agent memory" },
       { icon: "ph ph-git-branch", label: "develop" },
     ],
-    sessionTokens: tok >= 1000 ? (tok / 1000).toFixed(0) + "k" : String(tok),
-    sessionCost: "$" + totalUsd.toFixed(2),
+    sessionTokens: tok >= 1000 ? (tok / 1000).toFixed(1) + "k" : String(tok),
+    sessionCost: "$" + (totalUsd >= 0.01 || totalUsd === 0 ? totalUsd.toFixed(2) : totalUsd.toFixed(4)),
+    apiKeyMissing: !s.apiKey,
+    booted: s.booted,
+    chatEmpty: messages.length === 0,
     messages,
     attachments: s.attachments.map((at, i) => ({ name: at.name, icon: at.icon, onRemove: () => a.removeAttach(i) })),
     hasAttachments: s.attachments.length > 0,
@@ -1041,13 +1053,28 @@ export function deriveVals(s: State, a: Actions) {
     togglePicker: () => a.togglePicker(),
     newChat: () => a.newChat(),
 
-    // dashboard static
-    stats: DASH_STATS,
+    // dashboard — real projection when available, static fallback otherwise
+    stats: dash
+      ? [
+          { kicker: "Spend", value: "$" + dash.spend.toFixed(dash.spend >= 0.01 || dash.spend === 0 ? 2 : 4), meta: dash.apiKey ? "real API cost" : "set an API key", icon: "ph ph-coins" },
+          { kicker: "Messages", value: String(dash.messages), meta: "across " + dash.sessions + " sessions", icon: "ph ph-chats-circle" },
+          { kicker: "Tokens", value: dash.tokens >= 1000 ? (dash.tokens / 1000).toFixed(1) + "k" : String(dash.tokens), meta: "input + output", icon: "ph ph-textbox" },
+          { kicker: "Sessions", value: String(dash.sessions), meta: "chat threads", icon: "ph ph-squares-four" },
+        ]
+      : DASH_STATS,
     agents: DASH_AGENTS,
     tasks: DASH_TASKS,
 
-    // audit static
-    auditRows: AUDIT_ROWS,
+    // audit — real, append-only events from the backend
+    auditRows: s.events.slice(0, 14).map((e) => ({
+      id: e.id,
+      type: e.type,
+      actor: e.actor,
+      ver: 1,
+      cost: e.cost ? "$" + e.cost.toFixed(4) : "—",
+      approval: e.approval || "N/A",
+      apClass: e.approval === "Approved" ? "tag-accent" : e.approval === "Pending" ? "tag-outline" : "tag-neutral",
+    })),
   };
 }
 

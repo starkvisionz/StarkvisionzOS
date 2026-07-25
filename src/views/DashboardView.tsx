@@ -1,6 +1,5 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
-import { SimTag } from "../components/SimTag";
 
 export function DashboardView({ vals }: { vals: Vals }) {
   return (
@@ -9,7 +8,6 @@ export function DashboardView({ vals }: { vals: Vals }) {
         <div style={css("display:flex;align-items:flex-end;gap:12px;margin-bottom:20px")}>
           <h3 style={css("margin:0")}>Agent operations</h3>
           <span style={css("font-size:12px;color:var(--color-neutral-500);margin-bottom:3px")}>Live projection · rebuilt from the event store</span>
-          <SimTag />
         </div>
 
         <div style={css("display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:26px")}>
@@ -59,7 +57,7 @@ export function DashboardView({ vals }: { vals: Vals }) {
           </div>
 
           <div className="card elev-sm" style={css("gap:9px")}>
-            <div style={css("font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--color-neutral-600)")}>Needs you</div>
+            <div style={css("font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--color-neutral-600)")}>Needs you <span style={css("color:var(--color-neutral-700);text-transform:none;letter-spacing:0")}>· from Lab</span></div>
             {vals.attention.map((at, i) => (
               <div key={i} className="oc-nav-item" onClick={at.onClick} style={css("display:flex;align-items:center;gap:10px;padding:8px 9px;margin:0 -9px;border-radius:var(--radius-md);cursor:pointer")}>
                 <span style={css(`width:24px;height:24px;flex:none;border-radius:7px;background:${at.bg};display:grid;place-items:center`)}><i className={at.icon} style={css(`font-size:13px;color:${at.color}`)} /></span>
@@ -71,7 +69,7 @@ export function DashboardView({ vals }: { vals: Vals }) {
           </div>
         </div>
 
-        <div style={css("font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:11px")}>Agents</div>
+        <div style={css("font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:11px")}>Agents <span style={css("color:var(--color-neutral-700);text-transform:none;letter-spacing:0")}>· illustrative</span></div>
         <div style={css("display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:28px")}>
           {vals.agents.map((ag, i) => (
             <div key={i} className="card elev-sm" style={css("gap:10px")}>
@@ -90,7 +88,7 @@ export function DashboardView({ vals }: { vals: Vals }) {
           ))}
         </div>
 
-        <div style={css("font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:6px")}>Recent tasks · cost attribution</div>
+        <div style={css("font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:6px")}>Recent tasks · cost attribution <span style={css("color:var(--color-neutral-700);text-transform:none;letter-spacing:0")}>· illustrative</span></div>
         <table className="table">
           <thead><tr><th>Task</th><th>Agent</th><th>AI cost</th><th>Human</th><th>Rework</th><th>Outcome</th></tr></thead>
           <tbody>

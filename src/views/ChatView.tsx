@@ -1,6 +1,5 @@
 import { css } from "../css";
 import type { BlockVM, Vals } from "../os/deriveVals";
-import { SimTag } from "../components/SimTag";
 
 export function ChatView({ vals }: { vals: Vals }) {
   const model = vals.model;
@@ -16,7 +15,6 @@ export function ChatView({ vals }: { vals: Vals }) {
                 <i className={c.icon} style={css("font-size:12px")} />{c.label}
               </span>
             ))}
-            <SimTag label="Simulated chat" />
           </div>
         </div>
 
@@ -54,6 +52,15 @@ export function ChatView({ vals }: { vals: Vals }) {
       {/* thread */}
       <div className="oc-scroll" ref={vals.setThreadRef} style={css("flex:1;overflow-y:auto;padding:26px 0 20px")}>
         <div style={css("max-width:760px;margin:0 auto;padding:0 28px;display:flex;flex-direction:column;gap:22px")}>
+          {vals.chatEmpty && (
+            <div style={css("display:flex;flex-direction:column;align-items:center;gap:10px;padding:60px 20px;text-align:center;color:var(--color-neutral-500)")}>
+              <div style={css("width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--color-accent-500),var(--color-accent-700));display:grid;place-items:center;box-shadow:0 0 22px color-mix(in srgb,var(--color-accent) 40%,transparent)")}>
+                <i className="ph-fill ph-hand-tap" style={css("font-size:22px;color:#12141f")} />
+              </div>
+              <div style={css("font-size:15px;color:var(--color-neutral-200);font-family:var(--font-heading);font-weight:600")}>Message {model.name}</div>
+              <div style={css("font-size:12.5px;max-width:360px;line-height:1.5")}>Ask anything. Replies stream from the real Claude API and every turn is logged to the event store.{vals.apiKeyMissing ? " Set an API key to enable live replies." : ""}</div>
+            </div>
+          )}
           {vals.messages.map((msg, mi) =>
             msg.isUser ? (
               <div key={mi} style={css("display:flex;flex-direction:column;align-items:flex-end;gap:6px")}>
@@ -119,7 +126,7 @@ export function ChatView({ vals }: { vals: Vals }) {
               <button className="btn btn-secondary" onClick={vals.togglePicker} style={css("gap:6px;padding:5px 10px")}>
                 <span style={css(`width:7px;height:7px;border-radius:50%;background:${model.dot}`)} /><span style={css("font-size:12px")}>{model.name}</span>
               </button>
-              <span style={css("margin-left:auto;font-size:10.5px;color:var(--color-neutral-600)")}>Immutable event log · on</span>
+              <span style={css(`margin-left:auto;font-size:10.5px;color:${vals.apiKeyMissing ? "#d6c07a" : "var(--color-neutral-600)"}`)}>{vals.apiKeyMissing ? "No API key · replies explain setup" : "Immutable event log · on"}</span>
               <button className="btn btn-primary btn-icon" onClick={vals.send} title="Send" style={css("background:var(--color-accent);border-color:var(--color-accent)")}><i className="ph-fill ph-arrow-up" style={css("font-size:16px;color:#12141f")} /></button>
             </div>
           </div>

@@ -1,33 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Block, State, TimelineEvent } from "./types";
+import type { Block, ChatModel, Message, State, TimelineEvent } from "./types";
 import {
-  EVENT_POOL,
   INITIAL_ABOUT,
-  INITIAL_EVENTS,
   INITIAL_LOOP_TASK,
   INITIAL_MCP,
-  INITIAL_SESSIONS,
   INITIAL_SYS_PROMPT,
-  MODELS,
   PROJECTS,
   loopSeed,
-  replyFor,
-  seed,
 } from "./data";
 import { CLAIMS, NEG_TURNS, NIGHT_FINDINGS } from "./labdata";
+import { api, streamChat, type ApiEvent, type ApiMessage, type ApiSession } from "../api";
 
 function initialState(): State {
   return {
     view: "chat",
     pickerOpen: false,
-    modelId: "gpt-desktop",
-    activeId: "s1",
+    modelId: "claude-opus-5",
+    activeId: "",
     streaming: false,
     attachments: [],
-    sessions: INITIAL_SESSIONS.map((s) => ({ ...s })),
-    msgs: seed(),
+    sessions: [],
+    msgs: {},
     liveOn: true,
-    events: INITIAL_EVENTS.map((e) => ({ ...e })),
+    events: [],
     settingsTab: "prompt",
     sysPrompt: INITIAL_SYS_PROMPT,
     aboutText: INITIAL_ABOUT,
@@ -81,10 +76,62 @@ function initialState(): State {
     cfRunning: false,
     cfDone: false,
     marketCat: "Coding",
+    chatModels: [],
+    apiKey: false,
+    booted: false,
+    dash: null,
   };
 }
 
-let evtCounter = 0;
+// ── mapping helpers (backend → view state) ──
+function mapEvent(e: ApiEvent): TimelineEvent {
+  const d = new Date(e.created_at);
+  const time = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  return {
+    id: e.id,
+    type: e.type,
+    summary: e.summary,
+    actor: e.actor,
+    evidence: e.evidence,
+    icon: e.icon,
+    dot: e.dot,
+    time,
+    cost: e.cost,
+    approval: e.approval,
+    createdAt: e.created_at,
+  };
+}
+
+function mapSessions(sessions: ApiSession[]): State["sessions"] {
+  return sessions.map((s) => ({ id: s.id, title: s.title || "New chat", grp: s.grp || "Today", dot: "var(--color-neutral-500)" }));
+}
+
+function agentDisplay(model: string | null, models: ChatModel[]) {
+  const m = models.find((x) => x.id === model);
+  return { name: m?.name || "Claude", icon: "ph ph-sparkle", dot: m?.dot || "var(--color-accent)" };
+}
+
+function mapMessages(rows: ApiMessage[], models: ChatModel[]): Message[] {
+  return rows.map((r): Message => {
+    if (r.role === "user") {
+      return { id: r.id, role: "user", blocks: [{ id: r.id + "t", type: "text", text: r.content }], files: [] };
+    }
+    const ad = agentDisplay(r.model, models);
+    const tok = r.input_tokens + r.output_tokens;
+    return {
+      id: r.id,
+      role: "assistant",
+      agent: r.model || "claude-opus-5",
+      agentName: ad.name,
+      agentIcon: ad.icon,
+      agentDot: ad.dot,
+      cost: r.cost ? "$" + r.cost.toFixed(4) : "",
+      tokens: tok,
+      usd: r.cost,
+      blocks: [{ id: r.id + "b", type: "text", text: r.content }],
+    };
+  });
+}
 
 export interface Actions {
   openPalette(): void;
@@ -156,49 +203,24 @@ export interface Controller {
 
 export function useController(): Controller {
   const [state, setRaw] = useState<State>(initialState);
-
-  // A ref that always holds the latest state, so timers/handlers read fresh values.
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  const setState = useCallback(
-    (u: Partial<State> | ((s: State) => Partial<State>)) => {
-      setRaw((prev) => {
-        const patch = typeof u === "function" ? (u as (s: State) => Partial<State>)(prev) : u;
-        return { ...prev, ...patch };
-      });
-    },
-    [],
-  );
+  const setState = useCallback((u: Partial<State> | ((s: State) => Partial<State>)) => {
+    setRaw((prev) => {
+      const patch = typeof u === "function" ? (u as (s: State) => Partial<State>)(prev) : u;
+      return { ...prev, ...patch };
+    });
+  }, []);
 
-  // DOM refs
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const threadRef = useRef<HTMLDivElement | null>(null);
   const paletteRef = useRef<HTMLInputElement | null>(null);
 
-  // timer refs
-  const liveT = useRef<ReturnType<typeof setInterval> | null>(null);
   const loopT = useRef<ReturnType<typeof setInterval> | null>(null);
   const recT = useRef<ReturnType<typeof setInterval> | null>(null);
-  const streamT = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const now = useCallback(() => {
-    const d = new Date();
-    return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
-  }, []);
-
-  const pushEvent = useCallback(
-    (e: Partial<TimelineEvent> & Pick<TimelineEvent, "type" | "summary" | "actor" | "evidence" | "icon" | "dot">) => {
-      const id = "ev" + Date.now() + "_" + evtCounter++;
-      const evt: TimelineEvent = { ...e, id, time: e.time || now(), fresh: true };
-      setState((s) => ({ events: [evt, ...s.events].slice(0, 40) }));
-      setTimeout(
-        () => setState((s) => ({ events: s.events.map((x) => (x.id === id ? { ...x, fresh: false } : x)) })),
-        2200,
-      );
-    },
-    [now, setState],
-  );
+  const pollT = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chatAbort = useRef<AbortController | null>(null);
 
   const scrollThread = useCallback(() => {
     requestAnimationFrame(() => {
@@ -220,20 +242,78 @@ export function useController(): Controller {
     [setState],
   );
 
-  // ── live event stream ──
-  const startLive = useCallback(() => {
-    if (liveT.current) return;
-    liveT.current = setInterval(() => {
-      if (stateRef.current.liveOn) {
-        const p = EVENT_POOL[Math.floor(Math.random() * EVENT_POOL.length)];
-        pushEvent({ ...p });
-      }
-    }, 4500);
-  }, [pushEvent]);
+  const patchMessage = useCallback(
+    (sid: string, mid: string, patch: Partial<Message>) => {
+      setState((s) => {
+        const msgs = { ...s.msgs };
+        msgs[sid] = (msgs[sid] || []).map((m) => (m.id === mid ? { ...m, ...patch } : m));
+        return { msgs };
+      });
+    },
+    [setState],
+  );
 
-  // mount: seed live stream + keyboard shortcuts + click-away for picker
+  const refreshFeeds = useCallback(async () => {
+    try {
+      const [ev, dash] = await Promise.all([api.events(40), api.dashboard()]);
+      setState({ events: ev.events.map(mapEvent), dash });
+    } catch {
+      /* backend may be momentarily unavailable */
+    }
+  }, [setState]);
+
+  const refreshSessions = useCallback(async () => {
+    try {
+      const s = await api.listSessions();
+      setState({ sessions: mapSessions(s.sessions) });
+    } catch {
+      /* ignore */
+    }
+  }, [setState]);
+
+  const loadMessages = useCallback(
+    async (id: string) => {
+      try {
+        const r = await api.messages(id);
+        setState((s) => ({ msgs: { ...s.msgs, [id]: mapMessages(r.messages, s.chatModels) } }));
+        scrollThread();
+      } catch {
+        /* ignore */
+      }
+    },
+    [setState, scrollThread],
+  );
+
+  // ── boot: load models, sessions, first thread, feeds; wire shortcuts + polling ──
   useEffect(() => {
-    startLive();
+    let cancelled = false;
+    (async () => {
+      try {
+        const m = await api.models();
+        const sess = await api.listSessions();
+        let sessions = sess.sessions;
+        if (sessions.length === 0) {
+          const c = await api.createSession(m.default);
+          sessions = [c.session];
+        }
+        const active = sessions[0];
+        const msgsRes = await api.messages(active.id);
+        if (cancelled) return;
+        setState({
+          chatModels: m.models,
+          apiKey: m.apiKey,
+          modelId: m.default,
+          sessions: mapSessions(sessions),
+          activeId: active.id,
+          msgs: { [active.id]: mapMessages(msgsRes.messages, m.models) },
+          booted: true,
+        });
+        refreshFeeds();
+      } catch {
+        if (!cancelled) setState({ booted: true });
+      }
+    })();
+
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
         e.preventDefault();
@@ -243,25 +323,26 @@ export function useController(): Controller {
       if (e.key === "Escape") setState({ paletteOpen: false });
     };
     const onClick = (e: MouseEvent) => {
-      if (stateRef.current.pickerOpen && !(e.target as HTMLElement).closest(".btn")) {
-        setState({ pickerOpen: false });
-      }
+      if (stateRef.current.pickerOpen && !(e.target as HTMLElement).closest(".btn")) setState({ pickerOpen: false });
     };
     document.addEventListener("keydown", onKey);
     document.addEventListener("click", onClick);
+    pollT.current = setInterval(() => {
+      if (stateRef.current.liveOn && stateRef.current.booted) refreshFeeds();
+    }, 4500);
+
     return () => {
+      cancelled = true;
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("click", onClick);
-      if (liveT.current) clearInterval(liveT.current);
       if (loopT.current) clearInterval(loopT.current);
       if (recT.current) clearInterval(recT.current);
-      if (streamT.current) clearInterval(streamT.current);
-      liveT.current = null;
+      if (pollT.current) clearInterval(pollT.current);
+      chatAbort.current?.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── actions ──
   const actions: Actions = {
     openPalette() {
       setState({ paletteOpen: true, paletteQuery: "" });
@@ -288,13 +369,9 @@ export function useController(): Controller {
     selectProj(id) {
       const p = PROJECTS.find((x) => x.id === id)!;
       setState({ projId: id, repoId: p.repos[0].id, projOpen: false });
-      pushEvent({ type: "project.switched", summary: "Switched context to " + p.name, actor: "Eric Stark", evidence: "prj_" + id, icon: "ph ph-folders", dot: "var(--color-accent)" });
     },
     selectRepo(id) {
-      const p = PROJECTS.find((x) => x.id === stateRef.current.projId) || PROJECTS[0];
-      const r = p.repos.find((x) => x.id === id)!;
       setState({ repoId: id, repoOpen: false });
-      pushEvent({ type: "repo.scoped", summary: "Agent scope set to " + r.name + " · " + r.branch, actor: "Eric Stark", evidence: "repo_" + id, icon: "ph ph-git-branch", dot: "var(--color-accent)" });
     },
     selectGraphNode(id) {
       setState({ graphSel: id });
@@ -347,14 +424,10 @@ export function useController(): Controller {
         return;
       }
       setState({ replayRunning: true, replayDone: false });
-      setTimeout(() => {
-        setState({ replayRunning: false, replayDone: true });
-        pushEvent({ type: "decision.replayed", summary: "dec_204 replayed through Claude 4.5 — sharper, 3× cheaper", actor: "hub", evidence: "dec_204", icon: "ph ph-clock-clockwise", dot: "var(--color-accent-300)" });
-      }, 1500);
+      setTimeout(() => setState({ replayRunning: false, replayDone: true }), 1500);
     },
     mergeBranch(id) {
       setState({ mergedBranch: id });
-      pushEvent({ type: "branch.merged", summary: "Branch " + id.toUpperCase() + " merged into the main timeline", actor: "Eric Stark", evidence: "wf_datastore", icon: "ph ph-git-merge", dot: "var(--color-accent)" });
     },
     setMarketCat(c) {
       setState({ marketCat: c });
@@ -371,10 +444,6 @@ export function useController(): Controller {
           return { recStep: step, recRunning: !done, recDone: done };
         });
       }, 750);
-      setTimeout(
-        () => pushEvent({ type: "recovery.completed", summary: "Autonomous recovery restored deploy 38", actor: "hub", evidence: "run_1183", icon: "ph ph-heartbeat", dot: "var(--color-accent)" }),
-        6200,
-      );
     },
     runCounter() {
       const s = stateRef.current;
@@ -395,11 +464,7 @@ export function useController(): Controller {
         rev += 1;
         const done = rev >= script.length;
         setState({ loopRevealed: rev, loopRunning: !done, loopDone: done });
-        if (done) {
-          if (loopT.current) clearInterval(loopT.current);
-          const last = script[script.length - 1];
-          pushEvent({ type: "loop.converged", summary: "Multi-agent loop converged at score " + last.score, actor: "hub", evidence: "loop_" + (Math.floor(Math.random() * 900) + 100), icon: "ph ph-arrows-clockwise", dot: "var(--color-accent)" });
-        }
+        if (done && loopT.current) clearInterval(loopT.current);
       }, 1500);
     },
     resetLoop() {
@@ -456,28 +521,22 @@ export function useController(): Controller {
     },
     switchSession(id) {
       setState({ activeId: id, view: "chat" });
-      scrollThread();
+      if (!stateRef.current.msgs[id]) loadMessages(id);
+      else scrollThread();
     },
-    newChat() {
-      const s = stateRef.current;
-      const id = "s" + Date.now();
-      const modelName = (MODELS.find((x) => x.id === s.modelId) || MODELS[0]).name;
-      setState((st) => ({
-        activeId: id,
-        view: "chat",
-        sessions: [{ id, title: "New chat", grp: "Today", dot: "var(--color-neutral-500)" }, ...st.sessions],
-        msgs: {
-          ...st.msgs,
-          [id]: [
-            {
-              id: "m0",
-              role: "assistant",
-              agent: st.modelId,
-              blocks: [{ id: "b0", type: "text", text: "New chat — ask me anything. It'll route through " + modelName + " and every turn is logged to the Hub." }],
-            },
-          ],
-        },
-      }));
+    async newChat() {
+      try {
+        const c = await api.createSession(stateRef.current.modelId);
+        setState((s) => ({
+          activeId: c.session.id,
+          view: "chat",
+          sessions: [{ id: c.session.id, title: "New chat", grp: "Today", dot: "var(--color-accent)" }, ...s.sessions],
+          msgs: { ...s.msgs, [c.session.id]: [] },
+        }));
+        refreshFeeds();
+      } catch {
+        /* ignore */
+      }
     },
     togglePicker() {
       setState((s) => ({ pickerOpen: !s.pickerOpen }));
@@ -485,13 +544,11 @@ export function useController(): Controller {
     selectModel(id) {
       setState({ modelId: id, pickerOpen: false });
     },
-    approve(sid, bid) {
-      patchBlock(sid, bid, { status: "approved" });
-      pushEvent({ type: "human.change_approved", summary: "Agent action approved by Eric Stark", actor: "Eric Stark", evidence: "dec_" + (Math.floor(Math.random() * 900) + 100), icon: "ph ph-shield-check", dot: "var(--color-accent-300)" });
+    approve() {
+      /* approval blocks are part of the simulated seed; real chat has none */
     },
-    reject(sid, bid) {
-      patchBlock(sid, bid, { status: "rejected" });
-      pushEvent({ type: "human.change_rejected", summary: "Agent action rejected by Eric Stark", actor: "Eric Stark", evidence: "dec_" + (Math.floor(Math.random() * 900) + 100), icon: "ph ph-x-circle", dot: "var(--color-neutral-400)" });
+    reject() {
+      /* see approve() */
     },
     attach() {
       const names: [string, string][] = [["build.log", "ph ph-file-text"], ["schema.sql", "ph ph-database"], ["deploy.yaml", "ph ph-file-code"], ["design.fig", "ph ph-figma-logo"]];
@@ -503,52 +560,61 @@ export function useController(): Controller {
     },
     send() {
       const s = stateRef.current;
-      if (s.streaming) return;
+      if (s.streaming || !s.activeId) return;
       const el = inputRef.current;
       const text = (el ? el.value : "").trim();
-      if (!text && s.attachments.length === 0) return;
+      if (!text) return;
       if (el) {
         el.value = "";
         el.style.height = "auto";
       }
       const sid = s.activeId;
-      const files = s.attachments.slice();
+      const model = s.modelId;
       const uid = "u" + Date.now();
       const aid = "a" + Date.now();
-      const bid = "s" + Date.now();
-      const curMsgs = s.msgs[sid] || [];
-      const first =
-        curMsgs.length === 0 ||
-        curMsgs.every((m) => m.role === "assistant" && m.blocks[0] && /New chat/.test(m.blocks[0].text || ""));
+      const bid = "b" + Date.now();
+      const ad = agentDisplay(model, s.chatModels);
+      const wasEmpty = (s.msgs[sid] || []).filter((m) => m.role === "user").length === 0;
+
       setState((st) => {
-        const msgs = { ...st.msgs };
-        const base = first ? [] : (msgs[sid] || []).slice();
-        base.push({ id: uid, role: "user", blocks: [{ id: uid + "t", type: "text", text: text || "(sent attachments)" }], files });
-        base.push({ id: aid, role: "assistant", agent: st.modelId, blocks: [{ id: bid, type: "text", text: "", streaming: true }] });
-        msgs[sid] = base;
-        let sessions = st.sessions;
-        if (first && text) sessions = st.sessions.map((x) => (x.id === sid ? { ...x, title: text.slice(0, 42), dot: "var(--color-accent)" } : x));
-        return { msgs, streaming: true, attachments: [], sessions };
+        const base = (st.msgs[sid] || []).slice();
+        base.push({ id: uid, role: "user", blocks: [{ id: uid + "t", type: "text", text }], files: [] });
+        base.push({
+          id: aid,
+          role: "assistant",
+          agent: model,
+          agentName: ad.name,
+          agentIcon: ad.icon,
+          agentDot: ad.dot,
+          blocks: [{ id: bid, type: "text", text: "", streaming: true }],
+        });
+        return { msgs: { ...st.msgs, [sid]: base }, streaming: true, attachments: [] };
       });
       scrollThread();
-      const mp = MODELS.find((x) => x.id === s.modelId) || MODELS[0];
-      pushEvent({ type: "session.message", summary: "Message routed to " + mp.name + " · " + mp.sub, actor: "Eric Stark", evidence: "ses_" + (Math.floor(Math.random() * 9000) + 1000), icon: "ph ph-paper-plane-tilt", dot: "var(--color-neutral-400)" });
 
-      const full = replyFor(text, s.modelId);
-      const words = full.split(" ");
-      let i = 0;
-      if (streamT.current) clearInterval(streamT.current);
-      streamT.current = setInterval(() => {
-        i += 2;
-        const partial = words.slice(0, i).join(" ");
-        const done = i >= words.length;
-        patchBlock(sid, bid, { text: partial, streaming: !done });
-        scrollThread();
-        if (done) {
-          if (streamT.current) clearInterval(streamT.current);
-          setState({ streaming: false });
-        }
-      }, 55);
+      let acc = "";
+      chatAbort.current = streamChat(
+        { sessionId: sid, content: text, model },
+        {
+          onToken: (t) => {
+            acc += t;
+            patchBlock(sid, bid, { text: acc, streaming: true });
+            scrollThread();
+          },
+          onDone: (info) => {
+            patchBlock(sid, bid, { text: acc, streaming: false });
+            patchMessage(sid, aid, { tokens: info.tokens, usd: info.cost, cost: info.cost ? "$" + info.cost.toFixed(4) : "" });
+            setState({ streaming: false });
+            if (wasEmpty) refreshSessions();
+            refreshFeeds();
+          },
+          onError: (message) => {
+            patchBlock(sid, bid, { text: (acc ? acc + "\n\n" : "") + "⚠️ " + message, streaming: false });
+            setState({ streaming: false });
+            refreshFeeds();
+          },
+        },
+      );
     },
     onKeyDown(e) {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -569,7 +635,6 @@ export function useController(): Controller {
         setTimeout(() => {
           const last = i === NEG_TURNS.length - 1;
           setState({ negRevealed: i + 1, negRunning: !last, negDeal: last });
-          if (last) pushEvent({ type: "negotiation.settled", summary: "Deadlock settled by negotiation — 3 concessions recorded", actor: "hub", evidence: "neg_" + (Math.floor(Math.random() * 900) + 100), icon: "ph ph-handshake", dot: "var(--color-accent)" });
         }, 500 + i * 950),
       );
     },
@@ -582,7 +647,6 @@ export function useController(): Controller {
       NIGHT_FINDINGS.forEach((_, i) =>
         setTimeout(() => {
           setState({ nightRevealed: i + 1, nightRunning: i + 1 < NIGHT_FINDINGS.length });
-          if (i === NIGHT_FINDINGS.length - 1) pushEvent({ type: "nightshift.brief_filed", summary: "Nightshift filed the morning brief — 4 findings, 2 awaiting approval", actor: "hub", evidence: "shift_" + (Math.floor(Math.random() * 900) + 100), icon: "ph ph-moon-stars", dot: "var(--color-accent)" });
         }, 550 + i * 750),
       );
     },
