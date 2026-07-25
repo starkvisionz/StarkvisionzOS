@@ -1,8 +1,8 @@
 // Real, Claude-powered "Lab" features: the multi-agent loop and the Nightshift
 // brief. Both call the Anthropic API for real and log a domain event when done.
 
-import { anthropic, costFor, hasApiKey } from "./anthropic.ts";
-import { logConverged, logNightshift, recentEvents } from "./db.ts";
+import { anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
+import { latestExchange, logConverged, logNightshift, logReplay, recentEvents } from "./db.ts";
 
 type Send = (event: string, data: unknown) => void;
 
@@ -118,4 +118,97 @@ export async function runNightshift(send: Send): Promise<void> {
 
   logNightshift("hub", `Nightshift filed a brief — ${findings.length} finding(s)`);
   send("brief", { findings, cost });
+}
+
+/** Pick a sensible alternate model to replay through — a different, current
+ *  model than the one that produced the original answer. */
+function alternateModel(originalId: string): string {
+  if (originalId !== "claude-opus-5") return "claude-opus-5";
+  return "claude-sonnet-5";
+}
+
+export async function runReplay(send: Send, requestedModel?: string): Promise<void> {
+  if (!hasApiKey()) {
+    send("error", { message: "No Anthropic API key configured — set ANTHROPIC_API_KEY to replay a past turn through another model." });
+    return;
+  }
+  const ex = latestExchange();
+  if (!ex) {
+    send("error", { message: "No completed chat turn to replay yet. Send a message in Chat first, then replay it here." });
+    return;
+  }
+  const origModelId = ex.original.model || "claude-opus-5";
+  const origMeta = modelById(origModelId);
+  const origCost = ex.original.cost || 0;
+
+  const replayModelId = modelById(requestedModel || alternateModel(origModelId)).id;
+  const replayMeta = modelById(replayModelId);
+
+  // Tell the client what the original was before we spend anything.
+  send("original", {
+    prompt: ex.prompt,
+    content: ex.original.content,
+    model: origModelId,
+    modelName: origMeta.name,
+    dot: origMeta.dot,
+    cost: origCost,
+    createdAt: ex.original.created_at,
+  });
+  send("replayStart", { model: replayModelId, modelName: replayMeta.name, dot: replayMeta.dot });
+
+  // Re-run the same prompt through the alternate model, streaming the answer.
+  let acc = "";
+  const stream = anthropic().messages.stream({
+    model: replayModelId,
+    max_tokens: 1200,
+    system:
+      "You are Claude, an agent operating inside Starkvisionz OS. Answer the user's request directly and concisely. " +
+      "Format replies in GitHub-flavored markdown. Do not include internal or system XML tags in your response.",
+    messages: [{ role: "user", content: ex.prompt }],
+  });
+  stream.on("text", (delta) => {
+    acc += delta;
+    send("token", { text: delta });
+  });
+  const final = await stream.finalMessage();
+  const inTok = final.usage?.input_tokens ?? 0;
+  const outTok = final.usage?.output_tokens ?? 0;
+  let cost = costFor(replayModelId, inTok, outTok);
+
+  // Ask a cheap model to diff the two answers into a few concrete bullets.
+  const diffPrompt =
+    `Prompt:\n${ex.prompt}\n\nORIGINAL answer (${origMeta.name}):\n${ex.original.content}\n\n` +
+    `REPLAYED answer (${replayMeta.name}):\n${acc}\n\n` +
+    `List 2-4 concrete, specific ways the replayed answer differs from the original. ` +
+    `Return ONLY JSON: an array of {"kind": "add"|"change"|"drop", "text": "<short phrase>"}.`;
+  const d = await claudeText(
+    "claude-haiku-4-5",
+    "You compare two answers and report only the material differences. Respond only with the requested JSON.",
+    diffPrompt,
+    400,
+  );
+  cost += costFor("claude-haiku-4-5", d.inTok, d.outTok);
+  const parsedDiffs = extractJson(d.text);
+  const diffs = Array.isArray(parsedDiffs)
+    ? parsedDiffs
+        .filter((x) => x && typeof x === "object")
+        .map((x) => {
+          const o = x as Record<string, unknown>;
+          const kind = String(o.kind || "change");
+          return { kind: ["add", "change", "drop"].includes(kind) ? kind : "change", text: String(o.text || "") };
+        })
+        .filter((x) => x.text)
+        .slice(0, 4)
+    : [];
+
+  logReplay("hub", `Replayed a turn through ${replayMeta.name} (was ${origMeta.name})`, cost);
+  send("done", {
+    model: replayModelId,
+    modelName: replayMeta.name,
+    dot: replayMeta.dot,
+    content: acc,
+    cost,
+    origCost,
+    diffs,
+  });
 }

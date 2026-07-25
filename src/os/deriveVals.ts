@@ -25,7 +25,6 @@ import {
   RECOVERY_STEPS,
   REGRET_AGENTS,
   REGRET_ROWS,
-  REPLAY_DIFFS,
   SPEND,
   STAKES,
 } from "./labdata";
@@ -789,6 +788,21 @@ export function deriveVals(s: State, a: Actions) {
     };
   });
 
+  // ── model replay (real): cost comparison between original and replayed turn ──
+  let replayCostDelta = "";
+  if (s.replayDone && s.replayOrig && s.replayNew) {
+    const o = s.replayOrig.cost;
+    const n = s.replayNew.cost;
+    if (o > 0 && n > 0) {
+      const ratio = o / n;
+      replayCostDelta = ratio >= 1.05 ? ratio.toFixed(1) + "× cheaper" : n / o >= 1.05 ? (n / o).toFixed(1) + "× pricier" : "about the same cost";
+    } else if (n > 0) {
+      replayCostDelta = "$" + n.toFixed(4) + " this run";
+    } else {
+      replayCostDelta = "no cost recorded";
+    }
+  }
+
   // ── counterfactual ──
   const cfMetrics = CF_METRICS.map((m) => ({
     k: m.k,
@@ -965,12 +979,30 @@ export function deriveVals(s: State, a: Actions) {
     branches,
     runReplay: () => a.runReplay(),
     replayDone: s.replayDone,
-    replayPending: !s.replayDone,
-    replayHint: s.replayRunning ? "Replaying through Claude 4.5…" : "Run replay to compare",
-    replayBtnLabel: s.replayRunning ? "Replaying…" : s.replayDone ? "Reset" : "Replay through Claude 4.5",
+    replayError: s.replayError,
+    replayHasOrig: !!s.replayOrig,
+    replayPrompt: s.replayPrompt,
+    replayPromptShort: s.replayPrompt.length > 96 ? s.replayPrompt.slice(0, 96).trimEnd() + "…" : s.replayPrompt,
+    replayOrigContent: s.replayOrig?.content || "",
+    replayOrigModel: s.replayOrig?.modelName || "",
+    replayOrigDot: s.replayOrig?.dot || "var(--color-neutral-400)",
+    replayOrigCost: s.replayOrig ? "$" + s.replayOrig.cost.toFixed(4) : "—",
+    replayNewText: s.replayNewText,
+    replayNewModel: s.replayNew?.modelName || "",
+    replayNewDot: s.replayNew?.dot || "var(--color-accent)",
+    replayNewCost: s.replayNew ? "$" + s.replayNew.cost.toFixed(4) : "—",
+    replayStreaming: s.replayRunning && !!s.replayOrig && !s.replayDone,
+    replayCostDelta: replayCostDelta,
+    replayDiffs: s.replayReal.map((d) => {
+      const c = d.kind === "add" ? "var(--color-accent-300)" : d.kind === "drop" ? "#d68f9a" : "#d6c07a";
+      const icon = d.kind === "add" ? "ph ph-plus-circle" : d.kind === "drop" ? "ph ph-minus-circle" : "ph ph-arrows-left-right";
+      return { kind: d.kind, text: d.text, color: c, icon };
+    }),
+    replayPending: !s.replayOrig && !s.replayError,
+    replayHint: s.replayRunning ? "Replaying the last real turn through another model…" : "Run replay to compare the last chat turn across models",
+    replayBtnLabel: s.replayRunning ? "Replaying…" : s.replayDone ? "Replay again" : "Replay last turn",
     replayBtnIcon: s.replayRunning ? "ph ph-circle-notch" : s.replayDone ? "ph ph-arrow-counter-clockwise" : "ph ph-clock-clockwise",
     replaySpin: s.replayRunning ? "animation:ocspin 1s linear infinite" : "",
-    replayDiffs: REPLAY_DIFFS,
     marketCats,
     marketRows,
     recSteps,

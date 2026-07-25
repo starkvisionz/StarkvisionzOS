@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Block, ChatModel, LoopRoundSeed, Message, NightFinding, State, TimelineEvent } from "./types";
+import type { Block, ChatModel, LoopRoundSeed, Message, NightFinding, ReplayDiff, State, TimelineEvent } from "./types";
 import {
   INITIAL_ABOUT,
   INITIAL_LOOP_TASK,
@@ -84,6 +84,12 @@ function initialState(): State {
     loopError: "",
     nightReal: [],
     nightError: "",
+    replayError: "",
+    replayPrompt: "",
+    replayOrig: null,
+    replayNew: null,
+    replayNewText: "",
+    replayReal: [],
   };
 }
 
@@ -513,12 +519,52 @@ export function useController(): Controller {
     },
     runReplay() {
       const s = stateRef.current;
-      if (s.replayRunning || s.replayDone) {
-        setState({ replayDone: false, replayRunning: false });
-        return;
-      }
-      setState({ replayRunning: true, replayDone: false });
-      setTimeout(() => setState({ replayRunning: false, replayDone: true }), 1500);
+      if (s.replayRunning) return;
+      setState({
+        replayRunning: true,
+        replayDone: false,
+        replayError: "",
+        replayPrompt: "",
+        replayOrig: null,
+        replayNew: null,
+        replayNewText: "",
+        replayReal: [],
+      });
+      streamSSE("/api/replay/run", {}, (event, data) => {
+        if (event === "original") {
+          setState({
+            replayPrompt: String(data.prompt ?? ""),
+            replayOrig: {
+              content: String(data.content ?? ""),
+              model: String(data.model ?? ""),
+              modelName: String(data.modelName ?? "Claude"),
+              dot: String(data.dot ?? "var(--color-neutral-400)"),
+              cost: Number(data.cost) || 0,
+            },
+          });
+        } else if (event === "token") {
+          const t = String((data as { text?: string }).text ?? "");
+          setState((st) => ({ replayNewText: st.replayNewText + t }));
+        } else if (event === "done") {
+          const rawDiffs = Array.isArray(data.diffs) ? (data.diffs as Record<string, unknown>[]) : [];
+          const diffs: ReplayDiff[] = rawDiffs.map((d) => ({ kind: String(d.kind ?? "change"), text: String(d.text ?? "") }));
+          setState((st) => ({
+            replayRunning: false,
+            replayDone: true,
+            replayReal: diffs,
+            replayNew: {
+              content: String(data.content ?? st.replayNewText),
+              model: String(data.model ?? ""),
+              modelName: String(data.modelName ?? "Claude"),
+              dot: String(data.dot ?? "var(--color-accent)"),
+              cost: Number(data.cost) || 0,
+            },
+          }));
+          refreshFeeds();
+        } else if (event === "error") {
+          setState({ replayRunning: false, replayError: String(data.message || "Replay failed.") });
+        }
+      });
     },
     mergeBranch(id) {
       setState({ mergedBranch: id });

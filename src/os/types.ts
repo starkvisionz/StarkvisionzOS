@@ -161,6 +161,19 @@ export interface NightFinding {
   body: string;
 }
 
+export interface ReplayDiff {
+  kind: string; // "add" | "change" | "drop"
+  text: string;
+}
+
+export interface ReplaySide {
+  content: string;
+  model: string;
+  modelName: string;
+  dot: string;
+  cost: number;
+}
+
 export interface State {
   view: ViewId;
   pickerOpen: boolean;
@@ -234,4 +247,10 @@ export interface State {
   loopError: string;
   nightReal: NightFinding[];
   nightError: string;
+  replayError: string;
+  replayPrompt: string;
+  replayOrig: ReplaySide | null;
+  replayNew: ReplaySide | null;
+  replayNewText: string;
+  replayReal: ReplayDiff[];
 }

@@ -18,7 +18,7 @@ import {
   renameSessionCmd,
 } from "./db.ts";
 import { DEFAULT_MODEL, MODELS, anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
-import { runLoop, runNightshift } from "./agents.ts";
+import { runLoop, runNightshift, runReplay } from "./agents.ts";
 import {
   ACTOR,
   AUTH_REQUIRED,
@@ -262,6 +262,21 @@ app.post("/api/nightshift/run", rateLimit("agents", CHAT_LIMIT), async (_req: Re
     await runNightshift(send);
   } catch (err) {
     send("error", { message: err instanceof Error ? err.message : "Nightshift failed." });
+  }
+  res.end();
+});
+
+app.post("/api/replay/run", rateLimit("agents", CHAT_LIMIT), async (req: Request, res: Response) => {
+  const model = typeof req.body?.model === "string" ? req.body.model : undefined;
+  sseHeaders(res);
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+  try {
+    await runReplay(send, model);
+  } catch (err) {
+    send("error", { message: err instanceof Error ? err.message : "Replay failed." });
   }
   res.end();
 });

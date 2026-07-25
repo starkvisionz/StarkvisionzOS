@@ -1,14 +1,15 @@
 # Starkvisionz OS
 
 An event-sourced, multi-agent AI workspace. The **chat, timeline, audit,
-dashboard, settings, the multi-agent loop, and nightshift are real** — chat
-streams from the Anthropic Claude API and every turn is written to an append-only
-event store, from which the timeline, audit log, and dashboard projections are
-rebuilt. The multi-agent loop and nightshift make real Claude calls (an author +
-two reviewer lenses; an overnight brief generated from the real event log). The
-remaining **Lab** views (memory graph, agent market, replay, and the rest) are
-interactive **simulations** of where the concept could go; each is clearly
-labeled `Simulated` in the UI.
+dashboard, settings, the multi-agent loop, nightshift, and model replay are
+real** — chat streams from the Anthropic Claude API and every turn is written to
+an append-only event store, from which the timeline, audit log, and dashboard
+projections are rebuilt. The multi-agent loop, nightshift, and model replay make
+real Claude calls (an author + two reviewer lenses; an overnight brief generated
+from the real event log; and re-running your last real prompt through a different
+model with a real cost diff). The remaining **Lab** views (memory graph, agent
+market, negotiation, and the rest) are interactive **simulations** of where the
+concept could go; each is clearly labeled `Simulated` in the UI.
 
 The frontend is a faithful React/TypeScript implementation of the Claude Design
 prototype (`Starkvisionz OS.dc.html`). The visual system is **Nocturne** — its
@@ -26,8 +27,9 @@ darker ground and gradient-filled primary buttons layered on top in
 | **Dashboard** | Mostly real | Spend, message/token/session counts, and the 7-day spend chart are computed from real data; the agent scorecards and task table are illustrative sample data (marked *illustrative*) |
 | **Multi-agent loop** | Real | Claude Opus drafts; two Claude Haiku reviewer lenses (correctness, completeness) score and critique over SSE until the lowest score clears the target; each converged loop is logged as an event |
 | **Nightshift** | Real | Claude reads the recent `events` log and files a JSON morning brief (answered / pruned / drafted / watch); the brief is logged as an event |
+| **Model replay** | Real | Re-runs the most recent real user prompt through a different Claude model, streams the new answer, and has Claude Haiku diff it against the stored original — with the real token cost of each; logged as a `replay.done` event |
 | **Settings** | Real (persistence) | Persisted to the backend as a `settings.updated` event and reloaded on boot. System prompt, About text, and model drive real chat; the other toggles are saved but presentation-only for now |
-| **Lab views** | Simulated | Scripted, in-memory interactions — memory graph, branches, replay, market, recovery, counterfactual, truth decay, regret, negotiation, blind spots |
+| **Lab views** | Simulated | Scripted, in-memory interactions — memory graph, branches, market, recovery, counterfactual, truth decay, regret, negotiation, blind spots |
 
 Without an API key the app still runs — chat replies with a clear "no API key
 configured" message instead of calling the model, and the event store still
