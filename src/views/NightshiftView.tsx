@@ -1,17 +1,23 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
-import { SimTag } from "../components/SimTag";
 
 export function NightshiftView({ vals }: { vals: Vals }) {
   return (
     <div className="oc-scroll" style={css("flex:1;overflow-y:auto;padding:26px 34px 40px")}>
       <div style={css("max-width:740px;margin:0 auto")}>
-        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Nightshift</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>the Hub works while you sleep</span><SimTag /></div>
-        <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:620px;margin:0 0 18px")}>Idle capacity is not wasted. Overnight, agents replay the day's events, chase the questions you left open, prune contradictions out of memory, and leave one brief on the desk — nothing is executed without your morning approval.</p>
+        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Nightshift</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>Claude reviews the real event log and files a brief</span></div>
+        <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:620px;margin:0 0 18px")}>Run a shift and Claude reads the recent event log — the same append-only events behind the timeline and audit views — then files a short morning brief: what it would answer, prune, or draft, and what to keep an eye on. Nothing is executed; drafted items wait for your approval.</p>
+
+        {vals.nightError && (
+          <div style={css("display:flex;align-items:center;gap:10px;padding:11px 14px;margin-bottom:16px;border:1px solid color-mix(in srgb,#d68f9a 40%,transparent);border-radius:var(--radius-md);background:color-mix(in srgb,#d68f9a 12%,transparent);color:#e5b0b8;font-size:12.5px")}>
+            <i className="ph ph-warning-octagon" style={css("font-size:16px;flex:none")} />
+            <span>{vals.nightError}</span>
+          </div>
+        )}
 
         <div className="card elev-sm" style={css("flex-direction:row;align-items:center;gap:13px;padding:14px 16px;margin-bottom:20px")}>
           <i className="ph-fill ph-moon-stars" style={css("font-size:22px;color:var(--color-accent)")} />
-          <div style={css("flex:1")}><div style={css("font-size:13.5px;font-weight:600")}>Window 23:00 – 06:00 · budget {vals.nightBudget}</div><div style={css("font-size:11.5px;color:var(--color-neutral-500)")}>{vals.nightStatus}</div></div>
+          <div style={css("flex:1")}><div style={css("font-size:13.5px;font-weight:600")}>Overnight review · reads the recent event log</div><div style={css("font-size:11.5px;color:var(--color-neutral-500)")}>{vals.nightStatus}</div></div>
           <button className="btn btn-primary" onClick={vals.runNight} style={css("font-size:12.5px;gap:6px")}><i className={vals.nightBtnIcon} style={css(`font-size:14px;${vals.nightSpin}`)} />{vals.nightBtnLabel}</button>
         </div>
 

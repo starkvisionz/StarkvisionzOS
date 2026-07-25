@@ -1,6 +1,5 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
-import { SimTag } from "../components/SimTag";
 
 function Toggle({ trackBg, knobX, knobBg, onToggle }: { trackBg: string; knobX: string; knobBg: string; onToggle: () => void }) {
   return (
@@ -14,8 +13,8 @@ export function SettingsView({ vals }: { vals: Vals }) {
   return (
     <div className="oc-scroll" style={css("flex:1;overflow-y:auto;padding:26px 34px 40px")}>
       <div style={css("max-width:900px;margin:0 auto")}>
-        <div style={css("display:flex;align-items:center;gap:10px")}><h3 style={css("margin:0 0 4px")}>Settings</h3><SimTag /></div>
-        <span style={css("font-size:12px;color:var(--color-neutral-500)")}>Applies across every provider — ChatGPT, Hermes and the Hub agents · settings are not persisted</span>
+        <div style={css("display:flex;align-items:center;gap:10px")}><h3 style={css("margin:0 0 4px")}>Settings</h3></div>
+        <span style={css("font-size:12px;color:var(--color-neutral-500)")}>Persisted to the backend as an event and reloaded on boot. The system prompt, About text, and model drive real Claude chat; the remaining toggles are saved but presentation-only for now.</span>
         <div style={css("display:flex;gap:28px;margin-top:20px;align-items:flex-start")}>
           <div style={css("width:196px;flex:none;display:flex;flex-direction:column;gap:2px")}>
             {vals.settingsTabs.map((st, i) => (

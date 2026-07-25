@@ -136,11 +136,29 @@ export interface McpServer {
   icon: string;
 }
 
+export interface LoopReview {
+  agent: string;
+  score: number;
+  note: string;
+  name?: string;
+  icon?: string;
+  dot?: string;
+}
+
 export interface LoopRoundSeed {
   author: string;
   score: number;
   draft: string;
-  reviews: { agent: string; score: number; note: string }[];
+  reviews: LoopReview[];
+  authorName?: string;
+  authorIcon?: string;
+  authorDot?: string;
+}
+
+export interface NightFinding {
+  kind: string;
+  title: string;
+  body: string;
 }
 
 export interface State {
@@ -213,4 +231,7 @@ export interface State {
   booted: boolean;
   dash: DashProj | null;
   needsAuth: boolean;
+  loopError: string;
+  nightReal: NightFinding[];
+  nightError: string;
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Block, ChatModel, Message, State, TimelineEvent } from "./types";
+import type { Block, ChatModel, LoopRoundSeed, Message, NightFinding, State, TimelineEvent } from "./types";
 import {
   INITIAL_ABOUT,
   INITIAL_LOOP_TASK,
@@ -8,8 +8,8 @@ import {
   PROJECTS,
   loopSeed,
 } from "./data";
-import { CLAIMS, NEG_TURNS, NIGHT_FINDINGS } from "./labdata";
-import { ApiError, api, streamChat, type ApiEvent, type ApiMessage, type ApiSession } from "../api";
+import { CLAIMS, NEG_TURNS } from "./labdata";
+import { ApiError, api, streamChat, streamSSE, type ApiEvent, type ApiMessage, type ApiSession } from "../api";
 
 function initialState(): State {
   return {
@@ -81,6 +81,9 @@ function initialState(): State {
     booted: false,
     dash: null,
     needsAuth: false,
+    loopError: "",
+    nightReal: [],
+    nightError: "",
   };
 }
 
@@ -110,6 +113,30 @@ function mapSessions(sessions: ApiSession[]): State["sessions"] {
 function agentDisplay(model: string | null, models: ChatModel[]) {
   const m = models.find((x) => x.id === model);
   return { name: m?.name || "Claude", icon: "ph ph-sparkle", dot: m?.dot || "var(--color-accent)" };
+}
+
+function cap(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function mapLoopRound(data: Record<string, unknown>): LoopRoundSeed {
+  const reviews = Array.isArray(data.reviews) ? (data.reviews as Record<string, unknown>[]) : [];
+  return {
+    author: "claude-opus",
+    authorName: "Claude Opus",
+    authorIcon: "ph ph-sparkle",
+    authorDot: "var(--color-accent)",
+    score: Number(data.score) || 0,
+    draft: String(data.draft ?? ""),
+    reviews: reviews.map((rv) => ({
+      agent: String(rv.name ?? "reviewer"),
+      name: cap(String(rv.name ?? "reviewer")),
+      icon: "ph ph-scales",
+      dot: "var(--color-accent-400)",
+      score: Number(rv.score) || 0,
+      note: String(rv.note ?? ""),
+    })),
+  };
 }
 
 function mapMessages(rows: ApiMessage[], models: ChatModel[]): Message[] {
@@ -218,10 +245,11 @@ export function useController(): Controller {
   const threadRef = useRef<HTMLDivElement | null>(null);
   const paletteRef = useRef<HTMLInputElement | null>(null);
 
-  const loopT = useRef<ReturnType<typeof setInterval> | null>(null);
   const recT = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollT = useRef<ReturnType<typeof setInterval> | null>(null);
   const chatAbort = useRef<AbortController | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipSave = useRef(true);
 
   const scrollThread = useCallback(() => {
     requestAnimationFrame(() => {
@@ -291,10 +319,11 @@ export function useController(): Controller {
     (async () => {
       try {
         const m = await api.models();
+        const st = (await api.getSettings()).settings;
         const sess = await api.listSessions();
         let sessions = sess.sessions;
         if (sessions.length === 0) {
-          const c = await api.createSession(m.default);
+          const c = await api.createSession(st.model || m.default);
           sessions = [c.session];
         }
         const active = sessions[0];
@@ -303,10 +332,23 @@ export function useController(): Controller {
         setState({
           chatModels: m.models,
           apiKey: m.apiKey,
-          modelId: m.default,
+          modelId: st.model || m.default,
           sessions: mapSessions(sessions),
           activeId: active.id,
           msgs: { [active.id]: mapMessages(msgsRes.messages, m.models) },
+          // persisted settings
+          sysPrompt: st.sysPrompt,
+          aboutText: st.aboutText,
+          tools: st.tools,
+          plugins: st.plugins,
+          guards: st.guards,
+          mem: st.mem,
+          appear: st.appear,
+          stake: st.stake,
+          cap: st.cap,
+          capAction: st.capAction,
+          density: st.density,
+          half: st.half,
           booted: true,
         });
         refreshFeeds();
@@ -338,13 +380,62 @@ export function useController(): Controller {
       cancelled = true;
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("click", onClick);
-      if (loopT.current) clearInterval(loopT.current);
       if (recT.current) clearInterval(recT.current);
       if (pollT.current) clearInterval(pollT.current);
+      if (saveTimer.current) clearTimeout(saveTimer.current);
       chatAbort.current?.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── persist settings (debounced) whenever a settings field changes ──
+  useEffect(() => {
+    if (!state.booted) return;
+    if (skipSave.current) {
+      skipSave.current = false;
+      return;
+    }
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      const s = stateRef.current;
+      api
+        .putSettings({
+          sysPrompt: s.sysPrompt,
+          aboutText: s.aboutText,
+          model: s.modelId,
+          tools: s.tools,
+          plugins: s.plugins,
+          guards: s.guards,
+          mem: s.mem,
+          appear: s.appear,
+          stake: s.stake,
+          cap: s.cap,
+          capAction: s.capAction,
+          density: s.density,
+          half: s.half,
+        })
+        .catch(() => {});
+    }, 700);
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    state.booted,
+    state.sysPrompt,
+    state.aboutText,
+    state.modelId,
+    state.tools,
+    state.plugins,
+    state.guards,
+    state.mem,
+    state.appear,
+    state.stake,
+    state.cap,
+    state.capAction,
+    state.density,
+    state.half,
+  ]);
 
   const actions: Actions = {
     openPalette() {
@@ -458,38 +549,30 @@ export function useController(): Controller {
       setTimeout(() => setState({ cfRunning: false, cfDone: true }), 1400);
     },
     runLoop() {
-      if (stateRef.current.loopRunning) return;
-      if (loopT.current) clearInterval(loopT.current);
-      const script = loopSeed();
-      setState({ loopScript: script, loopRunning: true, loopDone: false, loopRevealed: 1 });
-      let rev = 1;
-      loopT.current = setInterval(() => {
-        rev += 1;
-        const done = rev >= script.length;
-        setState({ loopRevealed: rev, loopRunning: !done, loopDone: done });
-        if (done && loopT.current) clearInterval(loopT.current);
-      }, 1500);
+      const s = stateRef.current;
+      if (s.loopRunning) return;
+      const task = (s.loopTask || "").trim();
+      if (!task) return;
+      setState({ loopScript: [], loopRevealed: 0, loopRunning: true, loopDone: false, loopError: "" });
+      streamSSE("/api/loop/run", { task, target: 90 }, (event, data) => {
+        if (event === "round") {
+          const round = mapLoopRound(data);
+          setState((st) => {
+            const script = [...st.loopScript, round];
+            return { loopScript: script, loopRevealed: script.length };
+          });
+        } else if (event === "done") {
+          setState({ loopRunning: false, loopDone: !!data.converged });
+        } else if (event === "error") {
+          setState({ loopRunning: false, loopError: String(data.message || "Loop failed.") });
+        }
+      });
     },
     resetLoop() {
-      if (loopT.current) clearInterval(loopT.current);
-      setState({ loopRevealed: 0, loopRunning: false, loopDone: false, loopScript: loopSeed() });
+      setState({ loopScript: [], loopRevealed: 0, loopRunning: false, loopDone: false, loopError: "" });
     },
     improveMore() {
-      setState((s) => {
-        const prev = s.loopScript[s.loopScript.length - 1];
-        const sc = Math.min(prev.score + 3, 99);
-        const round = {
-          author: "forge",
-          score: sc,
-          draft: "Refined further: tightened the canonical-hash spec and made the dedupe window a config value with a safe 30-day default.",
-          reviews: [
-            { agent: "claude", score: Math.min(sc + 1, 99), note: "No further concerns." },
-            { agent: "hermes", score: sc, note: "Converged." },
-          ],
-        };
-        const script = [...s.loopScript, round];
-        return { loopScript: script, loopRevealed: script.length, loopDone: true };
-      });
+      actions.runLoop();
     },
     setLoopTask(v) {
       setState({ loopTask: v });
@@ -510,6 +593,8 @@ export function useController(): Controller {
       setState((s) => ({ mcp: s.mcp.map((m) => (m.id === id ? { ...m, connected: !m.connected } : m)) }));
     },
     savePrompt() {
+      const s = stateRef.current;
+      api.putSettings({ sysPrompt: s.sysPrompt, aboutText: s.aboutText }).catch(() => {});
       setState({ promptSaved: true });
       setTimeout(() => setState({ promptSaved: false }), 1900);
     },
@@ -646,12 +731,25 @@ export function useController(): Controller {
     },
     runNight() {
       if (stateRef.current.nightRunning) return;
-      setState({ nightRunning: true, nightRevealed: 0 });
-      NIGHT_FINDINGS.forEach((_, i) =>
-        setTimeout(() => {
-          setState({ nightRevealed: i + 1, nightRunning: i + 1 < NIGHT_FINDINGS.length });
-        }, 550 + i * 750),
-      );
+      setState({ nightRunning: true, nightRevealed: 0, nightReal: [], nightError: "" });
+      streamSSE("/api/nightshift/run", {}, (event, data) => {
+        if (event === "brief") {
+          const raw = Array.isArray(data.findings) ? (data.findings as Record<string, unknown>[]) : [];
+          const findings: NightFinding[] = raw.map((f) => ({
+            kind: String(f.kind ?? "watch"),
+            title: String(f.title ?? "Finding"),
+            body: String(f.body ?? ""),
+          }));
+          setState({ nightReal: findings });
+          // reveal findings one at a time for the animated feel
+          findings.forEach((_, i) =>
+            setTimeout(() => setState({ nightRevealed: i + 1, nightRunning: i + 1 < findings.length }), 260 * i),
+          );
+          if (findings.length === 0) setState({ nightRunning: false });
+        } else if (event === "error") {
+          setState({ nightRunning: false, nightError: String(data.message || "Nightshift failed.") });
+        }
+      });
     },
     reverify(id) {
       if (stateRef.current.checking[id]) return;

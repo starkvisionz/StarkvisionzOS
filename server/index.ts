@@ -8,14 +8,17 @@ import {
   dashboardFromEvents,
   deleteSessionCmd,
   getSession,
+  getSettings,
   historyForModel,
   listMessages,
   listSessions,
+  putSettingsCmd,
   rebuildProjections,
   recentEvents,
   renameSessionCmd,
 } from "./db.ts";
-import { CHAT_SYSTEM, DEFAULT_MODEL, MODELS, anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
+import { DEFAULT_MODEL, MODELS, anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
+import { runLoop, runNightshift } from "./agents.ts";
 import {
   ACTOR,
   AUTH_REQUIRED,
@@ -80,6 +83,16 @@ app.get("/api/sessions/:id/messages", (req, res) => {
   const s = getSession(req.params.id);
   if (!s) return res.status(404).json({ error: "not found" });
   res.json({ session: s, messages: listMessages(s.id) });
+});
+
+app.get("/api/settings", (_req, res) => {
+  res.json({ settings: getSettings() });
+});
+
+app.put("/api/settings", (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const saved = putSettingsCmd(body, ACTOR);
+  res.json({ settings: saved });
 });
 
 app.get("/api/events", (req, res) => {
@@ -151,11 +164,16 @@ app.post("/api/chat", rateLimit("chat", CHAT_LIMIT), async (req: Request, res: R
   }
 
   const messages = historyForModel(session.id);
+  const cfg = getSettings();
+  const system =
+    cfg.sysPrompt +
+    (cfg.aboutText ? "\n\nAbout the user you're assisting:\n" + cfg.aboutText : "") +
+    "\n\nFormat replies in GitHub-flavored markdown. Do not include internal or system XML tags in your response.";
   let acc = "";
   let aborted = false;
 
   try {
-    const stream = anthropic().messages.stream({ model, max_tokens: MAX_OUTPUT_TOKENS, system: CHAT_SYSTEM, messages });
+    const stream = anthropic().messages.stream({ model, max_tokens: MAX_OUTPUT_TOKENS, system, messages });
     req.on("close", () => {
       aborted = true;
       stream.abort();
@@ -200,6 +218,52 @@ app.post("/api/chat", rateLimit("chat", CHAT_LIMIT), async (req: Request, res: R
     send("error", { message });
     res.end();
   }
+});
+
+// ── real multi-agent loop (SSE) ──
+function sseHeaders(res: Response) {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+}
+
+app.post("/api/loop/run", rateLimit("agents", CHAT_LIMIT), async (req: Request, res: Response) => {
+  const task = (req.body?.task ?? "").toString().trim();
+  const target = Math.max(50, Math.min(99, Number(req.body?.target) || 90));
+  sseHeaders(res);
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+  if (!task) {
+    send("error", { message: "Provide a task for the loop." });
+    return res.end();
+  }
+  if (task.length > MAX_PROMPT_CHARS) {
+    send("error", { message: `Task too long (max ${MAX_PROMPT_CHARS} characters).` });
+    return res.end();
+  }
+  try {
+    await runLoop(send, task, target);
+  } catch (err) {
+    send("error", { message: err instanceof Error ? err.message : "Loop failed." });
+  }
+  res.end();
+});
+
+app.post("/api/nightshift/run", rateLimit("agents", CHAT_LIMIT), async (_req: Request, res: Response) => {
+  sseHeaders(res);
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+  try {
+    await runNightshift(send);
+  } catch (err) {
+    send("error", { message: err instanceof Error ? err.message : "Nightshift failed." });
+  }
+  res.end();
 });
 
 // ── serve the built frontend in production, if present ──
