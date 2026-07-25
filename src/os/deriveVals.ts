@@ -1041,6 +1041,7 @@ export function deriveVals(s: State, a: Actions) {
     sessionCost: "$" + (totalUsd >= 0.01 || totalUsd === 0 ? totalUsd.toFixed(2) : totalUsd.toFixed(4)),
     apiKeyMissing: !s.apiKey,
     booted: s.booted,
+    needsAuth: s.needsAuth,
     chatEmpty: messages.length === 0,
     messages,
     attachments: s.attachments.map((at, i) => ({ name: at.name, icon: at.icon, onRemove: () => a.removeAttach(i) })),

@@ -212,4 +212,5 @@ export interface State {
   apiKey: boolean;
   booted: boolean;
   dash: DashProj | null;
+  needsAuth: boolean;
 }

@@ -50,16 +50,45 @@ export interface DashProjection {
   apiKey: boolean;
 }
 
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+const TOKEN_KEY = "svos_token";
+export function getToken(): string {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+export function setToken(t: string): void {
+  try {
+    localStorage.setItem(TOKEN_KEY, t);
+  } catch {
+    /* ignore */
+  }
+}
+function authHeaders(): Record<string, string> {
+  const t = getToken();
+  return t ? { authorization: "Bearer " + t } : {};
+}
+
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
-    headers: { "content-type": "application/json", ...(init?.headers || {}) },
+    headers: { "content-type": "application/json", ...authHeaders(), ...(init?.headers || {}) },
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`);
   return res.json() as Promise<T>;
 }
 
 export const api = {
+  health: () => jsonFetch<{ ok: boolean; apiKey: boolean; model: string; authRequired: boolean }>("/api/health"),
   models: () => jsonFetch<{ models: ApiModel[]; default: string; apiKey: boolean }>("/api/models"),
   listSessions: () => jsonFetch<{ sessions: ApiSession[] }>("/api/sessions"),
   createSession: (model: string) =>
@@ -91,12 +120,12 @@ export function streamChat(
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...authHeaders() },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
       if (!res.ok || !res.body) {
-        cb.onError(`${res.status} ${res.statusText}`);
+        cb.onError(res.status === 401 ? "Unauthorized — check your access token." : `${res.status} ${res.statusText}`);
         return;
       }
       const reader = res.body.getReader();

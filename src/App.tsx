@@ -5,6 +5,7 @@ import { Sidebar } from "./components/Sidebar";
 import { CommandPalette } from "./components/CommandPalette";
 import { TimeTravel } from "./components/TimeTravel";
 import { PrototypeBanner } from "./components/PrototypeBanner";
+import { AuthGate } from "./components/AuthGate";
 import { ChatView } from "./views/ChatView";
 import { DashboardView } from "./views/DashboardView";
 import { TimelineView } from "./views/TimelineView";
@@ -30,6 +31,8 @@ const OUTER_STYLE =
 export function App() {
   const { state, actions } = useController();
   const vals = deriveVals(state, actions);
+
+  if (vals.needsAuth) return <AuthGate />;
 
   return (
     <div style={css(OUTER_STYLE)}>

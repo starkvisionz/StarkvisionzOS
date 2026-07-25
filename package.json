@@ -11,6 +11,7 @@
     "build": "tsc -b && vite build",
     "start": "node --import tsx server/index.ts",
     "preview": "vite preview",
+    "verify:events": "tsx server/verifyEvents.ts",
     "typecheck": "tsc -b --noEmit && tsc -p server/tsconfig.json --noEmit"
   },
   "dependencies": {

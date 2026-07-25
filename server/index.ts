@@ -1,36 +1,48 @@
 import express, { type Request, type Response } from "express";
-import cors from "cors";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import {
-  addMessage,
-  appendEvent,
-  createSession,
-  deleteSession,
-  db,
+  addAssistantMessageCmd,
+  addUserMessageCmd,
+  createSessionCmd,
+  dashboardFromEvents,
+  deleteSessionCmd,
   getSession,
   historyForModel,
   listMessages,
   listSessions,
+  rebuildProjections,
   recentEvents,
-  renameSession,
+  renameSessionCmd,
 } from "./db.ts";
 import { CHAT_SYSTEM, DEFAULT_MODEL, MODELS, anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
+import {
+  ACTOR,
+  AUTH_REQUIRED,
+  CHAT_LIMIT,
+  MAX_OUTPUT_TOKENS,
+  MAX_PROMPT_CHARS,
+  RATE_LIMIT,
+  cors,
+  rateLimit,
+  requireAuth,
+} from "./security.ts";
+
+if (process.env.SVOS_REBUILD_ON_START === "1") rebuildProjections();
 
 const PORT = Number(process.env.PORT || 8787);
 const app = express();
-app.use(cors());
+app.disable("x-powered-by");
+app.use(cors);
 app.use(express.json({ limit: "2mb" }));
 
-const nowTime = () => {
-  const d = new Date();
-  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
-};
-
-// ── meta ──
+// ── public: health (also tells the client whether auth is required) ──
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, apiKey: hasApiKey(), model: DEFAULT_MODEL });
+  res.json({ ok: true, apiKey: hasApiKey(), model: DEFAULT_MODEL, authRequired: AUTH_REQUIRED });
 });
+
+// ── everything else under /api is authenticated + rate-limited ──
+app.use("/api", requireAuth, rateLimit("api", RATE_LIMIT));
 
 app.get("/api/models", (_req, res) => {
   res.json({
@@ -40,27 +52,27 @@ app.get("/api/models", (_req, res) => {
   });
 });
 
-// ── sessions ──
 app.get("/api/sessions", (_req, res) => {
   res.json({ sessions: listSessions() });
 });
 
 app.post("/api/sessions", (req, res) => {
   const model = typeof req.body?.model === "string" ? req.body.model : DEFAULT_MODEL;
-  const s = createSession(modelById(model).id, "New chat");
-  appendEvent({ type: "session.created", summary: "New chat started", actor: "Eric Stark", evidence: s.id, icon: "ph ph-chats-circle", dot: "var(--color-neutral-400)" });
+  const s = createSessionCmd(modelById(model).id, ACTOR);
   res.json({ session: s });
 });
 
 app.patch("/api/sessions/:id", (req, res) => {
   const s = getSession(req.params.id);
   if (!s) return res.status(404).json({ error: "not found" });
-  if (typeof req.body?.title === "string") renameSession(s.id, req.body.title.slice(0, 80));
+  if (typeof req.body?.title === "string") renameSessionCmd(s.id, req.body.title.slice(0, 80), ACTOR);
   res.json({ session: getSession(s.id) });
 });
 
 app.delete("/api/sessions/:id", (req, res) => {
-  deleteSession(req.params.id);
+  const s = getSession(req.params.id);
+  if (!s) return res.status(404).json({ error: "not found" });
+  deleteSessionCmd(s.id, ACTOR); // tombstone — history is preserved
   res.json({ ok: true });
 });
 
@@ -70,54 +82,18 @@ app.get("/api/sessions/:id/messages", (req, res) => {
   res.json({ session: s, messages: listMessages(s.id) });
 });
 
-// ── events + projections ──
 app.get("/api/events", (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 40, 200);
   res.json({ events: recentEvents(limit) });
 });
 
 app.get("/api/projections/dashboard", (_req, res) => {
-  const agg = db
-    .prepare(
-      `SELECT
-         COALESCE(SUM(cost), 0) AS spend,
-         COUNT(*) AS msgs,
-         COALESCE(SUM(output_tokens + input_tokens), 0) AS tokens
-       FROM messages`,
-    )
-    .get() as { spend: number; msgs: number; tokens: number };
-  const sessionCount = (db.prepare(`SELECT COUNT(*) AS n FROM sessions`).get() as { n: number }).n;
-
-  // spend per day, last 7 days (local dates)
-  const days: { day: string; date: string; spend: number }[] = [];
-  const fmt = new Intl.DateTimeFormat("en-US", { weekday: "short" });
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const iso = d.toISOString().slice(0, 10);
-    days.push({ day: fmt.format(d), date: iso, spend: 0 });
-  }
-  const perDay = db
-    .prepare(
-      `SELECT substr(created_at, 1, 10) AS d, COALESCE(SUM(cost),0) AS c
-       FROM messages GROUP BY d`,
-    )
-    .all() as { d: string; c: number }[];
-  const byDate = new Map(perDay.map((r) => [r.d, r.c]));
-  for (const day of days) day.spend = byDate.get(day.date) || 0;
-
-  res.json({
-    spend: agg.spend,
-    messages: agg.msgs,
-    tokens: agg.tokens,
-    sessions: sessionCount,
-    spendDays: days,
-    apiKey: hasApiKey(),
-  });
+  const d = dashboardFromEvents();
+  res.json({ ...d, apiKey: hasApiKey() });
 });
 
 // ── chat (SSE streaming) ──
-app.post("/api/chat", async (req: Request, res: Response) => {
+app.post("/api/chat", rateLimit("chat", CHAT_LIMIT), async (req: Request, res: Response) => {
   const sessionId: string = req.body?.sessionId;
   const content: string = (req.body?.content ?? "").toString();
   const requestedModel: string = req.body?.model || DEFAULT_MODEL;
@@ -140,23 +116,37 @@ app.post("/api/chat", async (req: Request, res: Response) => {
     send("error", { message: "Empty message." });
     return res.end();
   }
+  if (content.length > MAX_PROMPT_CHARS) {
+    send("error", { message: `Message too long (max ${MAX_PROMPT_CHARS} characters).` });
+    return res.end();
+  }
 
   const model = modelById(requestedModel).id;
+  const md = modelById(model);
 
-  // persist the user turn + emit events
+  // persist the user turn (event-first, transactional) + rename on first turn
   const isFirst = listMessages(session.id).filter((m) => m.role === "user").length === 0;
-  addMessage({ session_id: session.id, role: "user", content, model: null, input_tokens: 0, output_tokens: 0, cost: 0 });
-  if (isFirst) renameSession(session.id, content.slice(0, 42));
-  appendEvent({ type: "session.message", summary: "Message routed to " + modelById(model).name, actor: "Eric Stark", evidence: session.id, icon: "ph ph-paper-plane-tilt", dot: "var(--color-neutral-400)" });
+  addUserMessageCmd(session.id, content, ACTOR, md.name);
+  if (isFirst) renameSessionCmd(session.id, content.slice(0, 42), ACTOR);
 
   if (!hasApiKey()) {
     const msg =
       "The backend is running, but no Anthropic API key is configured, so I can't generate a real reply yet. " +
       "Set ANTHROPIC_API_KEY in the server environment (see .env.example) and restart — then this chat streams real Claude responses.";
     send("token", { text: msg });
-    const saved = addMessage({ session_id: session.id, role: "assistant", content: msg, model, input_tokens: 0, output_tokens: 0, cost: 0 });
-    appendEvent({ type: "agent.reply", summary: "Reply blocked — no API key configured", actor: modelById(model).name, evidence: saved.id, icon: "ph ph-warning", dot: "#d68f9a" });
-    send("done", { messageId: saved.id, cost: 0, tokens: 0, model, needsKey: true });
+    const id = addAssistantMessageCmd({
+      sessionId: session.id,
+      content: msg,
+      model,
+      modelName: md.name,
+      dot: "#d68f9a",
+      inputTokens: 0,
+      outputTokens: 0,
+      cost: 0,
+      icon: "ph ph-warning",
+      summary: "Reply blocked — no API key configured",
+    });
+    send("done", { messageId: id, cost: 0, tokens: 0, model, needsKey: true });
     return res.end();
   }
 
@@ -165,18 +155,11 @@ app.post("/api/chat", async (req: Request, res: Response) => {
   let aborted = false;
 
   try {
-    const stream = anthropic().messages.stream({
-      model,
-      max_tokens: 16000,
-      system: CHAT_SYSTEM,
-      messages,
-    });
-
+    const stream = anthropic().messages.stream({ model, max_tokens: MAX_OUTPUT_TOKENS, system: CHAT_SYSTEM, messages });
     req.on("close", () => {
       aborted = true;
       stream.abort();
     });
-
     stream.on("text", (delta) => {
       acc += delta;
       send("token", { text: delta });
@@ -186,26 +169,34 @@ app.post("/api/chat", async (req: Request, res: Response) => {
     const inTok = final.usage?.input_tokens ?? 0;
     const outTok = final.usage?.output_tokens ?? 0;
     const cost = costFor(model, inTok, outTok);
-
-    const saved = addMessage({
-      session_id: session.id,
-      role: "assistant",
+    const id = addAssistantMessageCmd({
+      sessionId: session.id,
       content: acc,
       model,
-      input_tokens: inTok,
-      output_tokens: outTok,
+      modelName: md.name,
+      dot: md.dot,
+      inputTokens: inTok,
+      outputTokens: outTok,
       cost,
     });
-    appendEvent({ type: "agent.reply", summary: modelById(model).name + " replied · " + outTok + " tok", actor: modelById(model).name, evidence: saved.id, icon: "ph ph-sparkle", dot: modelById(model).dot, cost });
-    appendEvent({ type: "cost.recorded", summary: "Turn cost $" + cost.toFixed(4) + " · " + (inTok + outTok) + " tok", actor: "hub", evidence: saved.id, icon: "ph ph-coins", dot: "var(--color-neutral-400)", cost });
-    send("done", { messageId: saved.id, cost, tokens: inTok + outTok, model });
+    send("done", { messageId: id, cost, tokens: inTok + outTok, model });
     res.end();
   } catch (err) {
     if (aborted) return res.end();
     const message = err instanceof Error ? err.message : "Unknown error calling the model.";
-    // persist whatever streamed, plus the error, so the event log stays honest
-    if (acc) addMessage({ session_id: session.id, role: "assistant", content: acc, model, input_tokens: 0, output_tokens: 0, cost: 0 });
-    appendEvent({ type: "agent.error", summary: "Model call failed: " + message.slice(0, 80), actor: modelById(model).name, evidence: session.id, icon: "ph ph-warning-octagon", dot: "#d68f9a" });
+    if (acc)
+      addAssistantMessageCmd({
+        sessionId: session.id,
+        content: acc + "\n\n_(response interrupted by an error)_",
+        model,
+        modelName: md.name,
+        dot: "#d68f9a",
+        inputTokens: 0,
+        outputTokens: 0,
+        cost: 0,
+        icon: "ph ph-warning-octagon",
+        summary: "Model call failed mid-stream",
+      });
     send("error", { message });
     res.end();
   }
@@ -220,5 +211,6 @@ if (existsSync(dist)) {
 
 app.listen(PORT, () => {
   const key = hasApiKey() ? "configured" : "MISSING (set ANTHROPIC_API_KEY)";
-  console.log(`[svos] api on http://localhost:${PORT} · Anthropic key: ${key} · time ${nowTime()}`);
+  const auth = AUTH_REQUIRED ? "bearer token required" : "OPEN to loopback only (set SVOS_AUTH_TOKEN for remote)";
+  console.log(`[svos] api on http://localhost:${PORT} · Anthropic key: ${key} · auth: ${auth}`);
 });

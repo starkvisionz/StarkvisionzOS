@@ -42,13 +42,42 @@ records the turn.
 - `src/components/`, `src/views/` — the sidebar, overlays, and one file per view.
 
 **Backend** (`server/`)
-- `server/db.ts` — SQLite (better-sqlite3). Append-only `events` (the source of
-  truth) plus `sessions` and `messages` projections for the chat surface.
+- `server/db.ts` — SQLite (better-sqlite3), genuinely event-sourced. The
+  append-only `events` table is the source of truth; `sessions` and `messages`
+  are **projections** rebuildable from it. Every command appends its domain
+  event(s) **and** applies them to the projection inside one transaction, so the
+  log and projection can't drift. `rebuildProjections()` replays the whole log
+  to reconstruct the projection from scratch.
+- `server/security.ts` — bearer-token auth, CORS allow-listing, a fixed-window
+  rate limiter, and request budgets.
 - `server/anthropic.ts` — the Anthropic client, the real Claude model roster
   (Opus 5 / Sonnet 5 / Haiku 4.5 / Opus 4.8), and token→cost pricing.
-- `server/index.ts` — an Express API: sessions CRUD, SSE `POST /api/chat`
-  streaming from Claude, the `/api/events` feed, and `/api/projections/dashboard`.
-  In production it also serves the built frontend.
+- `server/index.ts` — the Express API: authenticated sessions CRUD, SSE
+  `POST /api/chat` streaming from Claude, the `/api/events` feed, and
+  `/api/projections/dashboard`. In production it also serves the built frontend.
+- `server/verifyEvents.ts` — `npm run verify:events` asserts the projection
+  replays identically from the log and that deleting a conversation preserves
+  its analytics.
+
+### Security & data model
+
+- **Auth.** The API is protected by a shared bearer token (`SVOS_AUTH_TOKEN`).
+  When set, every `/api` call (except `/api/health`) requires it; the web client
+  prompts once and stores it locally. When unset, the API serves **loopback
+  only** and refuses remote callers — an unconfigured public deployment is closed
+  by default. **Set `SVOS_AUTH_TOKEN` before exposing the server to a network.**
+- **CORS** is closed by default; cross-origin is opt-in via
+  `SVOS_ALLOWED_ORIGINS`.
+- **Budgets & rate limits.** Per-token/IP fixed-window limits on `/api` and a
+  tighter one on `/api/chat`, a max prompt length, and a per-reply `max_tokens`
+  ceiling (all env-tunable — see `.env.example`).
+- **Event actor** is derived from configuration (`SVOS_ACTOR`, default
+  `operator`), not hard-coded.
+- **Deletion is a tombstone.** Deleting a conversation appends a
+  `session.deleted` event and soft-deletes the projection row; the underlying
+  `message.created` events remain, so historical spend, tokens, and counts —
+  which the dashboard computes from the immutable event log — are never erased.
+  The audit log and dashboard therefore stay consistent.
 
 ## Develop
 

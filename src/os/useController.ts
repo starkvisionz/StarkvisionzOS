@@ -9,7 +9,7 @@ import {
   loopSeed,
 } from "./data";
 import { CLAIMS, NEG_TURNS, NIGHT_FINDINGS } from "./labdata";
-import { api, streamChat, type ApiEvent, type ApiMessage, type ApiSession } from "../api";
+import { ApiError, api, streamChat, type ApiEvent, type ApiMessage, type ApiSession } from "../api";
 
 function initialState(): State {
   return {
@@ -80,6 +80,7 @@ function initialState(): State {
     apiKey: false,
     booted: false,
     dash: null,
+    needsAuth: false,
   };
 }
 
@@ -309,8 +310,10 @@ export function useController(): Controller {
           booted: true,
         });
         refreshFeeds();
-      } catch {
-        if (!cancelled) setState({ booted: true });
+      } catch (e) {
+        if (cancelled) return;
+        const unauth = e instanceof ApiError && e.status === 401;
+        setState({ booted: true, needsAuth: unauth });
       }
     })();
 
