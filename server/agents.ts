@@ -2,7 +2,7 @@
 // brief. Both call the Anthropic API for real and log a domain event when done.
 
 import { anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
-import { latestExchange, logConverged, logNightshift, logReplay, recentEvents } from "./db.ts";
+import { latestExchange, logBranches, logConverged, logNightshift, logReplay, recentEvents } from "./db.ts";
 
 type Send = (event: string, data: unknown) => void;
 
@@ -211,4 +211,93 @@ export async function runReplay(send: Send, requestedModel?: string): Promise<vo
     origCost,
     diffs,
   });
+}
+
+// ── agent branches: fork one decision into parallel, independent explorations ──
+const BRANCH_PERSONAS = [
+  {
+    key: "pragmatic",
+    label: "Pragmatic",
+    icon: "ph ph-hammer",
+    dot: "var(--color-accent)",
+    system: "You are a pragmatic staff engineer. Favor proven, boring technology and the fastest path to a shippable result. Optimize for time-to-ship and low operational surprise.",
+  },
+  {
+    key: "robust",
+    label: "Robust",
+    icon: "ph ph-shield-check",
+    dot: "#c9a27f",
+    system: "You are a reliability-minded architect. Favor correctness, scalability, and long-term maintainability even at some extra upfront effort. Optimize for durability under load and change.",
+  },
+  {
+    key: "lean",
+    label: "Lean",
+    icon: "ph ph-feather",
+    dot: "#7fbfa8",
+    system: "You are a minimalist engineer. Favor the smallest, cheapest solution that could possibly work. Optimize for low cost and low complexity, cutting anything non-essential.",
+  },
+];
+
+export async function runBranches(send: Send, task: string): Promise<void> {
+  if (!hasApiKey()) {
+    send("error", { message: "No Anthropic API key configured — set ANTHROPIC_API_KEY to fork real agent branches." });
+    return;
+  }
+  const model = "claude-opus-5";
+  let cost = 0;
+  const letters = ["A", "B", "C"];
+
+  const branches: {
+    id: string;
+    letter: string;
+    persona: string;
+    personaIcon: string;
+    personaDot: string;
+    title: string;
+    summary: string;
+    effort: string;
+    risk: string;
+    cost: number;
+  }[] = [];
+
+  for (let i = 0; i < BRANCH_PERSONAS.length; i++) {
+    const p = BRANCH_PERSONAS[i];
+    const prompt =
+      `Decision to make:\n${task}\n\n` +
+      `Propose ONE concrete approach that reflects your priorities. ` +
+      `Return ONLY JSON: {"title": "<=6 words naming the approach", "summary": "1-2 sentences on the approach and its main tradeoff", "effort": "S"|"M"|"L", "risk": "Low"|"Medium"|"High"}.`;
+    const r = await claudeText(model, p.system + " Respond only with the requested JSON.", prompt, 400);
+    cost += costFor(model, r.inTok, r.outTok);
+    const parsed = (extractJson(r.text) || {}) as Record<string, unknown>;
+    const effort = String(parsed.effort || "M").toUpperCase();
+    const risk = String(parsed.risk || "Medium");
+    branches.push({
+      id: p.key,
+      letter: letters[i] || String(i + 1),
+      persona: p.label,
+      personaIcon: p.icon,
+      personaDot: p.dot,
+      title: String(parsed.title || `${p.label} approach`).slice(0, 60),
+      summary: String(parsed.summary || r.text.slice(0, 160)).trim(),
+      effort: ["S", "M", "L"].includes(effort) ? effort : "M",
+      risk: ["Low", "Medium", "High"].includes(risk) ? risk : "Medium",
+      cost: costFor(model, r.inTok, r.outTok),
+    });
+  }
+
+  // A judge picks the single best branch for this decision.
+  let recommended = branches[0]?.id || "";
+  let rationale = "";
+  const judgePrompt =
+    `Decision:\n${task}\n\nCandidate approaches:\n` +
+    branches.map((b) => `- [${b.id}] ${b.title} (effort ${b.effort}, risk ${b.risk}): ${b.summary}`).join("\n") +
+    `\n\nPick the single best approach overall. Return ONLY JSON: {"best": "<one of the bracketed ids>", "reason": "<one short sentence>"}.`;
+  const j = await claudeText("claude-haiku-4-5", "You are a decisive technical judge. Respond only with the requested JSON.", judgePrompt, 200);
+  cost += costFor("claude-haiku-4-5", j.inTok, j.outTok);
+  const judged = extractJson(j.text) as { best?: string; reason?: string } | null;
+  if (judged?.best && branches.some((b) => b.id === judged.best)) recommended = judged.best;
+  rationale = (judged?.reason || "").trim();
+
+  logBranches("hub", `Forked ${branches.length} agent branches for a decision`, cost);
+  send("branches", { branches: branches.map((b) => ({ ...b, recommended: b.id === recommended })), recommended, rationale, cost });
 }

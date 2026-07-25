@@ -115,7 +115,8 @@ export interface DomainEvent {
     | "settings.updated"
     | "loop.converged"
     | "nightshift.filed"
-    | "replay.done";
+    | "replay.done"
+    | "branches.forked";
   actor: string;
   summary: string;
   icon?: string;
@@ -260,6 +261,10 @@ export function logNightshift(actor: string, summary: string): void {
 
 export function logReplay(actor: string, summary: string, cost: number): void {
   emit([{ type: "replay.done", actor, summary, icon: "ph ph-clock-clockwise", dot: "var(--color-accent-300)", cost, payload: {} }]);
+}
+
+export function logBranches(actor: string, summary: string, cost: number): void {
+  emit([{ type: "branches.forked", actor, summary, icon: "ph ph-git-branch", dot: "var(--color-accent-400)", cost, payload: {} }]);
 }
 
 // ── reads ──

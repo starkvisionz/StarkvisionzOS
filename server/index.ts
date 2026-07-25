@@ -18,7 +18,7 @@ import {
   renameSessionCmd,
 } from "./db.ts";
 import { DEFAULT_MODEL, MODELS, anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
-import { runLoop, runNightshift, runReplay } from "./agents.ts";
+import { runBranches, runLoop, runNightshift, runReplay } from "./agents.ts";
 import {
   ACTOR,
   AUTH_REQUIRED,
@@ -277,6 +277,29 @@ app.post("/api/replay/run", rateLimit("agents", CHAT_LIMIT), async (req: Request
     await runReplay(send, model);
   } catch (err) {
     send("error", { message: err instanceof Error ? err.message : "Replay failed." });
+  }
+  res.end();
+});
+
+app.post("/api/branches/run", rateLimit("agents", CHAT_LIMIT), async (req: Request, res: Response) => {
+  const task = (req.body?.task ?? "").toString().trim();
+  sseHeaders(res);
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+  if (!task) {
+    send("error", { message: "Provide a decision to fork into branches." });
+    return res.end();
+  }
+  if (task.length > MAX_PROMPT_CHARS) {
+    send("error", { message: `Decision too long (max ${MAX_PROMPT_CHARS} characters).` });
+    return res.end();
+  }
+  try {
+    await runBranches(send, task);
+  } catch (err) {
+    send("error", { message: err instanceof Error ? err.message : "Branching failed." });
   }
   res.end();
 });

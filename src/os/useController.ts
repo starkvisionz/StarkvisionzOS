@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Block, ChatModel, LoopRoundSeed, Message, NightFinding, ReplayDiff, State, TimelineEvent } from "./types";
+import type { Block, BranchResult, ChatModel, LoopRoundSeed, Message, NightFinding, ReplayDiff, State, TimelineEvent } from "./types";
 import {
   INITIAL_ABOUT,
   INITIAL_LOOP_TASK,
@@ -90,6 +90,11 @@ function initialState(): State {
     replayNew: null,
     replayNewText: "",
     replayReal: [],
+    branchTask: "Choose the primary datastore and framework for the event hub.",
+    branchRunning: false,
+    branchError: "",
+    branchReal: [],
+    branchRationale: "",
   };
 }
 
@@ -193,6 +198,8 @@ export interface Actions {
   setHalf(v: number): void;
   runReplay(): void;
   mergeBranch(id: string): void;
+  runBranches(): void;
+  setBranchTask(v: string): void;
   setMarketCat(c: string): void;
   runRecovery(): void;
   runCounter(): void;
@@ -568,6 +575,38 @@ export function useController(): Controller {
     },
     mergeBranch(id) {
       setState({ mergedBranch: id });
+    },
+    setBranchTask(v) {
+      setState({ branchTask: v });
+    },
+    runBranches() {
+      const s = stateRef.current;
+      if (s.branchRunning) return;
+      const task = (s.branchTask || "").trim();
+      if (!task) return;
+      setState({ branchRunning: true, branchError: "", branchReal: [], branchRationale: "", mergedBranch: null });
+      streamSSE("/api/branches/run", { task }, (event, data) => {
+        if (event === "branches") {
+          const raw = Array.isArray(data.branches) ? (data.branches as Record<string, unknown>[]) : [];
+          const branches: BranchResult[] = raw.map((b) => ({
+            id: String(b.id ?? ""),
+            letter: String(b.letter ?? "?"),
+            persona: String(b.persona ?? "Agent"),
+            personaIcon: String(b.personaIcon ?? "ph ph-robot"),
+            personaDot: String(b.personaDot ?? "var(--color-accent)"),
+            title: String(b.title ?? "Approach"),
+            summary: String(b.summary ?? ""),
+            effort: String(b.effort ?? "M"),
+            risk: String(b.risk ?? "Medium"),
+            cost: Number(b.cost) || 0,
+            recommended: !!b.recommended,
+          }));
+          setState({ branchRunning: false, branchReal: branches, branchRationale: String(data.rationale ?? "") });
+          refreshFeeds();
+        } else if (event === "error") {
+          setState({ branchRunning: false, branchError: String(data.message || "Branching failed.") });
+        }
+      });
     },
     setMarketCat(c) {
       setState({ marketCat: c });

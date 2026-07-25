@@ -174,6 +174,20 @@ export interface ReplaySide {
   cost: number;
 }
 
+export interface BranchResult {
+  id: string;
+  letter: string;
+  persona: string;
+  personaIcon: string;
+  personaDot: string;
+  title: string;
+  summary: string;
+  effort: string;
+  risk: string;
+  cost: number;
+  recommended: boolean;
+}
+
 export interface State {
   view: ViewId;
   pickerOpen: boolean;
@@ -253,4 +267,9 @@ export interface State {
   replayNew: ReplaySide | null;
   replayNewText: string;
   replayReal: ReplayDiff[];
+  branchTask: string;
+  branchRunning: boolean;
+  branchError: string;
+  branchReal: BranchResult[];
+  branchRationale: string;
 }

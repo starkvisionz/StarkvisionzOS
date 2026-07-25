@@ -724,26 +724,57 @@ export function deriveVals(s: State, a: Actions) {
     arrow: i < GQ.path.length - 1,
   }));
 
-  // ── agent branches ──
+  // ── agent branches (real: three Claude personas draft candidate approaches) ──
   const mcolor = (t: string) => (t === "good" ? "var(--color-accent-300)" : t === "warn" ? "#d6bd8f" : t === "bad" ? "#d68f9a" : "var(--color-neutral-200)");
-  const branches = BRANCHES.map((b) => {
-    const isM = s.mergedBranch === b.id;
-    return {
-      letter: b.letter,
-      title: b.title,
-      agent: b.agent,
-      agentIcon: b.agentIcon,
-      recommended: b.recommended,
-      border: b.recommended ? "var(--color-accent-500)" : "var(--color-divider)",
-      badgeBg: b.recommended ? "var(--color-accent)" : "var(--color-neutral-800)",
-      badgeFg: b.recommended ? "#0a0c14" : "var(--color-neutral-200)",
-      metrics: b.metrics.map(([k, v, t]) => ({ k, v, color: mcolor(t) })),
-      btnClass: isM ? "btn-secondary" : b.recommended ? "btn-primary" : "btn-secondary",
-      btnIcon: isM ? "ph ph-check" : "ph ph-git-merge",
-      btnLabel: isM ? "Merged" : "Merge this",
-      onMerge: () => a.mergeBranch(b.id),
-    };
-  });
+  const hasRealBranches = s.branchReal.length > 0;
+  const minBranchCost = hasRealBranches ? Math.min(...s.branchReal.map((b) => b.cost)) : 0;
+  const maxBranchCost = hasRealBranches ? Math.max(...s.branchReal.map((b) => b.cost)) : 0;
+  const effortTone = (e: string) => (e === "S" ? "good" : e === "L" ? "warn" : "");
+  const riskTone = (r: string) => (r === "Low" ? "good" : r === "High" ? "bad" : "warn");
+  const branches = hasRealBranches
+    ? s.branchReal.map((b) => {
+        const isM = s.mergedBranch === b.id;
+        const costTone = b.cost <= minBranchCost ? "good" : b.cost >= maxBranchCost && maxBranchCost > minBranchCost ? "warn" : "";
+        return {
+          letter: b.letter,
+          title: b.title,
+          agent: b.persona,
+          agentIcon: b.personaIcon,
+          recommended: b.recommended,
+          summary: b.summary,
+          border: b.recommended ? "var(--color-accent-500)" : "var(--color-divider)",
+          badgeBg: b.recommended ? "var(--color-accent)" : "var(--color-neutral-800)",
+          badgeFg: b.recommended ? "#0a0c14" : "var(--color-neutral-200)",
+          metrics: [
+            { k: "Effort", v: b.effort === "S" ? "Small" : b.effort === "L" ? "Large" : "Medium", color: mcolor(effortTone(b.effort)) },
+            { k: "Risk", v: b.risk, color: mcolor(riskTone(b.risk)) },
+            { k: "Draft cost", v: "$" + b.cost.toFixed(4), color: mcolor(costTone) },
+          ],
+          btnClass: isM ? "btn-secondary" : b.recommended ? "btn-primary" : "btn-secondary",
+          btnIcon: isM ? "ph ph-check" : "ph ph-git-merge",
+          btnLabel: isM ? "Merged" : "Merge this",
+          onMerge: () => a.mergeBranch(b.id),
+        };
+      })
+    : BRANCHES.map((b) => {
+        const isM = s.mergedBranch === b.id;
+        return {
+          letter: b.letter,
+          title: b.title,
+          agent: b.agent,
+          agentIcon: b.agentIcon,
+          recommended: b.recommended,
+          summary: "",
+          border: b.recommended ? "var(--color-accent-500)" : "var(--color-divider)",
+          badgeBg: b.recommended ? "var(--color-accent)" : "var(--color-neutral-800)",
+          badgeFg: b.recommended ? "#0a0c14" : "var(--color-neutral-200)",
+          metrics: b.metrics.map(([k, v, t]) => ({ k, v, color: mcolor(t) })),
+          btnClass: isM ? "btn-secondary" : b.recommended ? "btn-primary" : "btn-secondary",
+          btnIcon: isM ? "ph ph-check" : "ph ph-git-merge",
+          btnLabel: isM ? "Merged" : "Merge this",
+          onMerge: () => a.mergeBranch(b.id),
+        };
+      });
 
   // ── agent market ──
   const marketCats = ["Coding", "Research", "Deploy", "Summarize"].map((c) => ({
@@ -977,6 +1008,16 @@ export function deriveVals(s: State, a: Actions) {
     goRiskTab: () => { a.switchView("settings"); a.setSettingsTab("risk"); },
     stakeSummary: stake.policy[1][1] + " reviewer(s) · " + stake.policy[2][1].toLowerCase() + " gated · " + stake.policy[0][1],
     branches,
+    branchTask: s.branchTask,
+    onBranchTask: (e: React.ChangeEvent<HTMLInputElement>) => a.setBranchTask(e.target.value),
+    runBranches: () => a.runBranches(),
+    branchError: s.branchError,
+    branchHasReal: hasRealBranches,
+    branchRationale: s.branchRationale,
+    branchEmpty: !hasRealBranches && !s.branchError,
+    branchBtnLabel: s.branchRunning ? "Forking…" : hasRealBranches ? "Fork again" : "Fork branches",
+    branchBtnIcon: s.branchRunning ? "ph ph-circle-notch" : "ph ph-git-branch",
+    branchSpin: s.branchRunning ? "animation:ocspin 1s linear infinite" : "",
     runReplay: () => a.runReplay(),
     replayDone: s.replayDone,
     replayError: s.replayError,
