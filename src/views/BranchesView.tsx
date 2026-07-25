@@ -1,11 +1,12 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
+import { SimTag } from "../components/SimTag";
 
 export function BranchesView({ vals }: { vals: Vals }) {
   return (
     <div className="oc-scroll" style={css("flex:1;overflow-y:auto;padding:26px 34px 40px")}>
       <div style={css("max-width:960px;margin:0 auto")}>
-        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Agent branches</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>fork one decision into parallel agent explorations</span></div>
+        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Agent branches</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>fork one decision into parallel agent explorations</span><SimTag /></div>
         <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:600px;margin:0 0 8px")}>Multiple agents build the same decision independently — the Hub compares cost, effort, risk and performance before you merge one into the main timeline.</p>
         <div style={css("font-size:13px;color:var(--color-neutral-300);margin-bottom:16px")}><i className="ph ph-git-fork" style={css("font-size:15px;color:var(--color-accent-300);vertical-align:-2px")} /> Decision: <b>primary datastore &amp; framework for the event hub</b></div>
         <div style={css("display:grid;grid-template-columns:repeat(3,1fr);gap:13px")}>

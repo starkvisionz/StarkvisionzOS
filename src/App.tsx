@@ -4,6 +4,7 @@ import { css } from "./css";
 import { Sidebar } from "./components/Sidebar";
 import { CommandPalette } from "./components/CommandPalette";
 import { TimeTravel } from "./components/TimeTravel";
+import { PrototypeBanner } from "./components/PrototypeBanner";
 import { ChatView } from "./views/ChatView";
 import { DashboardView } from "./views/DashboardView";
 import { TimelineView } from "./views/TimelineView";
@@ -23,15 +24,17 @@ import { NegotiationView } from "./views/NegotiationView";
 import { BlindSpotView } from "./views/BlindSpotView";
 import { SettingsView } from "./views/SettingsView";
 
-const ROOT_STYLE =
-  "position:fixed;inset:0;display:flex;background:radial-gradient(1200px 720px at 80% -12%, color-mix(in srgb,var(--color-accent) 14%,transparent), transparent 58%), radial-gradient(900px 600px at 0% 110%, color-mix(in srgb,var(--color-accent) 8%,transparent), transparent 55%), var(--color-bg);color:var(--color-text);font-family:var(--font-body)";
+const OUTER_STYLE =
+  "position:fixed;inset:0;display:flex;flex-direction:column;background:radial-gradient(1200px 720px at 80% -12%, color-mix(in srgb,var(--color-accent) 14%,transparent), transparent 58%), radial-gradient(900px 600px at 0% 110%, color-mix(in srgb,var(--color-accent) 8%,transparent), transparent 55%), var(--color-bg);color:var(--color-text);font-family:var(--font-body)";
 
 export function App() {
   const { state, actions } = useController();
   const vals = deriveVals(state, actions);
 
   return (
-    <div style={css(ROOT_STYLE)}>
+    <div style={css(OUTER_STYLE)}>
+      <PrototypeBanner />
+      <div style={css("flex:1;min-height:0;display:flex;position:relative")}>
       <Sidebar vals={vals} />
 
       <main style={css("flex:1;min-width:0;display:flex;flex-direction:column")}>
@@ -54,6 +57,7 @@ export function App() {
         {vals.isBlind && <BlindSpotView vals={vals} />}
         {vals.isSettings && <SettingsView vals={vals} />}
       </main>
+      </div>
 
       {vals.paletteOpen && <CommandPalette vals={vals} />}
       {vals.timeTravel && <TimeTravel vals={vals} />}

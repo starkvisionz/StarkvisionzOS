@@ -1,5 +1,6 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
+import { SimTag } from "../components/SimTag";
 
 export function DashboardView({ vals }: { vals: Vals }) {
   return (
@@ -8,6 +9,7 @@ export function DashboardView({ vals }: { vals: Vals }) {
         <div style={css("display:flex;align-items:flex-end;gap:12px;margin-bottom:20px")}>
           <h3 style={css("margin:0")}>Agent operations</h3>
           <span style={css("font-size:12px;color:var(--color-neutral-500);margin-bottom:3px")}>Live projection · rebuilt from the event store</span>
+          <SimTag />
         </div>
 
         <div style={css("display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:26px")}>

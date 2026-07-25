@@ -1,5 +1,6 @@
 import { css } from "../css";
 import type { BlockVM, Vals } from "../os/deriveVals";
+import { SimTag } from "../components/SimTag";
 
 export function ChatView({ vals }: { vals: Vals }) {
   const model = vals.model;
@@ -15,6 +16,7 @@ export function ChatView({ vals }: { vals: Vals }) {
                 <i className={c.icon} style={css("font-size:12px")} />{c.label}
               </span>
             ))}
+            <SimTag label="Simulated chat" />
           </div>
         </div>
 

@@ -12,7 +12,7 @@ export function Sidebar({ vals }: { vals: Vals }) {
         <span style={css("font-family:var(--font-heading);font-weight:600;font-size:14.5px;letter-spacing:-.01em")}>
           Starkvisionz<span style={css("color:var(--color-accent-300)")}> OS</span>
         </span>
-        <span className="tag tag-outline" style={css("margin-left:auto;font-size:9px;padding:2px 6px")}>SVH</span>
+        <span className="sim-tag" style={css("margin-left:auto")} title="Non-production prototype — all data and actions are simulated.">Prototype</span>
       </div>
 
       {/* project + repo selectors */}

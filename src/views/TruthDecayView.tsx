@@ -1,11 +1,12 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
+import { SimTag } from "../components/SimTag";
 
 export function TruthDecayView({ vals }: { vals: Vals }) {
   return (
     <div className="oc-scroll" style={css("flex:1;overflow-y:auto;padding:26px 34px 40px")}>
       <div style={css("max-width:760px;margin:0 auto")}>
-        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Truth decay</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>every claim has a half-life</span></div>
+        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Truth decay</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>every claim has a half-life</span><SimTag /></div>
         <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:620px;margin:0 0 18px")}>Each factual claim an agent shipped is stored with its source and a confidence half-life. As the world moves, confidence decays on its own — the Hub re-verifies against the live source instead of pretending an answer from March is still true.</p>
 
         <div style={css("display:flex;align-items:center;gap:14px;padding:13px 16px;border-radius:var(--radius-md);background:linear-gradient(180deg,color-mix(in srgb,var(--color-accent) 11%,var(--color-surface)),var(--color-surface));border:1px solid var(--color-divider);margin-bottom:20px")}>

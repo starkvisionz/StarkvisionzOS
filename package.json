@@ -1,9 +1,9 @@
 {
-  "name": "starkvisionz-os",
+  "name": "starkvisionz-os-prototype",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Starkvisionz OS — an event-sourced, multi-agent AI workspace.",
+  "description": "Starkvisionz OS (Prototype) — a non-production front-end demo of an event-sourced, multi-agent AI workspace. All data and actions are simulated; there is no backend.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

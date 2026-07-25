@@ -98,3 +98,42 @@ textarea,
 input {
   font-family: var(--font-body);
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Prototype scoping. This app is a non-production front-end demo: all data and
+   actions are simulated. The banner and the per-feature "Simulated" tag make
+   that unmistakable in the UI. They use an amber/caution tone so they read as
+   a disclaimer rather than as another accent feature.
+   ────────────────────────────────────────────────────────────────────────── */
+.proto-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 16px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--color-neutral-200);
+  background: color-mix(in srgb, #d6c07a 14%, #05060c);
+  border-bottom: 1px solid color-mix(in srgb, #d6c07a 45%, transparent);
+}
+.proto-banner b {
+  color: #e0cf94;
+  font-weight: 600;
+}
+.sim-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, #d6c07a 55%, transparent);
+  color: #d6c07a;
+  background: color-mix(in srgb, #d6c07a 12%, transparent);
+  white-space: nowrap;
+}

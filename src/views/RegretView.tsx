@@ -1,11 +1,12 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
+import { SimTag } from "../components/SimTag";
 
 export function RegretView({ vals }: { vals: Vals }) {
   return (
     <div className="oc-scroll" style={css("flex:1;overflow-y:auto;padding:26px 34px 40px")}>
       <div style={css("max-width:780px;margin:0 auto")}>
-        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Regret index</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>scored in hindsight, not at answer time</span></div>
+        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Regret index</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>scored in hindsight, not at answer time</span><SimTag /></div>
         <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:620px;margin:0 0 20px")}>Confidence is cheap — every agent is sure. Once the world returns a verdict, the Hub re-scores the decision against what actually happened. Regret is the gap between how sure it was and how right it turned out.</p>
 
         <div style={css("display:flex;gap:11px;margin-bottom:24px")}>

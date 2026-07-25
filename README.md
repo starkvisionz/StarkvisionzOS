@@ -1,16 +1,42 @@
-# Starkvisionz OS
+# Starkvisionz OS (Prototype)
 
-An event-sourced, multi-agent AI workspace. Every turn — a chat message, a tool
-call, an approval, a deploy — is an immutable event, and every view in the app is
-a **projection rebuilt from that event store**. Chat routes across providers
-(ChatGPT, Hermes, Forge, Claude) through one Hub, and the "Lab" turns the event
-log into things a normal chat UI can't do: a queryable memory graph, a
-multi-agent review loop, truth-decay tracking, regret scoring, and more.
+> ⚠️ **Non-production front-end prototype.** This is a UI demo only. **Every
+> feature is simulated** — all data is mock, there is **no backend, no database,
+> no real AI/model calls, no MCP connectors, and nothing is ever deployed**. No
+> button performs a real side effect; "streaming" replies are canned text on a
+> timer, "costs" and "spend" are made up, and the "event store," "providers,"
+> "approvals," and "deploys" are all fixtures. Do not point this at real
+> credentials or treat any number, log, or action in it as real. The UI labels
+> this too: a persistent banner across the top and a `Simulated` tag on every
+> view.
+
+A design concept for an event-sourced, multi-agent AI workspace. The idea it
+illustrates: every turn — a chat message, a tool call, an approval, a deploy —
+would be an immutable event, and every view is a **projection rebuilt from that
+event store**. Chat routes across providers (ChatGPT, Hermes, Forge, Claude)
+through one Hub, and the "Lab" shows things a normal chat UI can't: a queryable
+memory graph, a multi-agent review loop, truth-decay tracking, regret scoring,
+and more. **None of that machinery exists here** — this repo is only the
+front-end that portrays it.
 
 This is a faithful React/TypeScript implementation of the Claude Design prototype
 (`Starkvisionz OS.dc.html`). The visual system is **Nocturne** — its tokens and
 component classes live in `src/styles/nocturne.css`, with the app's darker ground
 and gradient-filled primary buttons layered on top in `src/styles/app.css`.
+
+## What's simulated (i.e. everything)
+
+| Appears to… | Actually… |
+| --- | --- |
+| Route chat to ChatGPT / Hermes / Forge / Claude and stream a reply | Picks a hard-coded string and reveals it word-by-word on a `setInterval` — no network, no model |
+| Show a live event stream, token counts, and dollar spend | Appends random fixtures from a fixed pool; all tokens/costs are literals in the source |
+| Deploy, run autonomous recovery, replay a decision, run a nightshift | Advances a scripted, timed animation; nothing runs or ships |
+| Connect/disconnect MCP servers, toggle tools & plugins | Flips a boolean in local React state; no server is contacted |
+| Approve/reject an agent action, save settings, close a blind spot | Updates in-memory state only; **nothing persists** across a reload |
+| Query the memory graph / re-verify a claim | Returns a pre-written answer after a short delay |
+
+All state is in-memory and resets on refresh. There is no persistence, no auth,
+and no external I/O of any kind.
 
 ## Views
 

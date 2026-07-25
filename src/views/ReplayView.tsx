@@ -1,11 +1,12 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
+import { SimTag } from "../components/SimTag";
 
 export function ReplayView({ vals }: { vals: Vals }) {
   return (
     <div className="oc-scroll" style={css("flex:1;overflow-y:auto;padding:26px 34px 40px")}>
       <div style={css("max-width:900px;margin:0 auto")}>
-        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Model replay</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>re-run an old decision through a newer model</span></div>
+        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Model replay</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>re-run an old decision through a newer model</span><SimTag /></div>
         <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:600px;margin:0 0 16px")}>Replay the original event sequence — same requirements, same constraints — through a better model, and diff what changes. The project gets smarter as the models do.</p>
         <div className="card elev-sm" style={css("flex-direction:row;align-items:center;gap:12px;padding:12px 15px;margin-bottom:16px")}>
           <i className="ph ph-git-fork" style={css("font-size:18px;color:var(--color-accent-300)")} />

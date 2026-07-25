@@ -1,11 +1,12 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
+import { SimTag } from "../components/SimTag";
 
 export function BlindSpotView({ vals }: { vals: Vals }) {
   return (
     <div className="oc-scroll" style={css("flex:1;overflow-y:auto;padding:26px 34px 40px")}>
       <div style={css("max-width:780px;margin:0 auto")}>
-        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Blind spot map</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>what the Hub knows it doesn't know</span></div>
+        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Blind spot map</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>what the Hub knows it doesn't know</span><SimTag /></div>
         <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:620px;margin:0 0 20px")}>The inverse of the memory graph. Every time an agent had to fill a gap with an assumption, the gap gets logged. Ranked by how often it was guessed and how much rides on it — silent hallucination pressure turned into a list you can close.</p>
 
         <div style={css("display:flex;align-items:center;gap:16px;padding:13px 16px;border-radius:var(--radius-md);background:var(--color-surface);border:1px solid var(--color-divider);margin-bottom:20px")}>

@@ -1,11 +1,12 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
+import { SimTag } from "../components/SimTag";
 
 export function GraphView({ vals }: { vals: Vals }) {
   return (
     <div className="oc-scroll" style={css("flex:1;overflow-y:auto;padding:26px 34px 40px")}>
       <div style={css("max-width:1060px;margin:0 auto")}>
-        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Memory graph</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>the organizational memory, queryable</span></div>
+        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Memory graph</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>the organizational memory, queryable</span><SimTag /></div>
         <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:640px;margin:0 0 16px")}>Not a chat history — a graph built from the event links. Every requirement, decision, artifact, agent and constraint is a node, and every edge is an event that actually happened. Ask it why something exists and it walks the chain back to the turn that caused it.</p>
 
         <div style={css("display:flex;align-items:center;gap:9px;padding:11px 14px;border-radius:var(--radius-md);background:linear-gradient(180deg,color-mix(in srgb,var(--color-accent) 11%,var(--color-surface)),var(--color-surface));border:1px solid var(--color-accent-600);margin-bottom:14px")}>

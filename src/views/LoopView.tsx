@@ -1,5 +1,6 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
+import { SimTag } from "../components/SimTag";
 
 export function LoopView({ vals }: { vals: Vals }) {
   return (
@@ -8,6 +9,7 @@ export function LoopView({ vals }: { vals: Vals }) {
         <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}>
           <h3 style={css("margin:0")}>Multi-agent loop</h3>
           <span style={css("font-size:12px;color:var(--color-neutral-500)")}>agents review and improve each other until they converge</span>
+          <SimTag />
         </div>
         <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:600px;margin:0 0 18px")}>An author agent drafts, reviewers score and critique, and the best notes fold into the next round. Every round is logged as an event; the loop stops when the score clears the target.</p>
 

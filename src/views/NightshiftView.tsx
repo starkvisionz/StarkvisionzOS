@@ -1,11 +1,12 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
+import { SimTag } from "../components/SimTag";
 
 export function NightshiftView({ vals }: { vals: Vals }) {
   return (
     <div className="oc-scroll" style={css("flex:1;overflow-y:auto;padding:26px 34px 40px")}>
       <div style={css("max-width:740px;margin:0 auto")}>
-        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Nightshift</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>the Hub works while you sleep</span></div>
+        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Nightshift</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>the Hub works while you sleep</span><SimTag /></div>
         <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:620px;margin:0 0 18px")}>Idle capacity is not wasted. Overnight, agents replay the day's events, chase the questions you left open, prune contradictions out of memory, and leave one brief on the desk — nothing is executed without your morning approval.</p>
 
         <div className="card elev-sm" style={css("flex-direction:row;align-items:center;gap:13px;padding:14px 16px;margin-bottom:20px")}>

@@ -1,11 +1,12 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
+import { SimTag } from "../components/SimTag";
 
 export function RecoveryView({ vals }: { vals: Vals }) {
   return (
     <div className="oc-scroll" style={css("flex:1;overflow-y:auto;padding:26px 34px 40px")}>
       <div style={css("max-width:720px;margin:0 auto")}>
-        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Autonomous recovery</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>closed-loop deploy failure → verified fix</span></div>
+        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Autonomous recovery</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>closed-loop deploy failure → verified fix</span><SimTag /></div>
         <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:600px;margin:0 0 16px")}>When a deploy fails the Hub captures the last good state, diagnoses, tests a fix in isolation, requests approval, redeploys and verifies — instead of an agent editing YAML until the error changes.</p>
         <div style={css("display:flex;align-items:center;gap:11px;padding:12px 15px;border-radius:var(--radius-md);background:color-mix(in srgb,#d68f9a 14%,var(--color-surface));border:1px solid color-mix(in srgb,#d68f9a 40%,transparent);margin-bottom:18px")}>
           <i className="ph-fill ph-warning" style={css("font-size:20px;color:#d68f9a")} />

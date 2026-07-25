@@ -1,11 +1,12 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
+import { SimTag } from "../components/SimTag";
 
 export function CounterfactualView({ vals }: { vals: Vals }) {
   return (
     <div className="oc-scroll" style={css("flex:1;overflow-y:auto;padding:26px 34px 40px")}>
       <div style={css("max-width:760px;margin:0 auto")}>
-        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Counterfactual simulation</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>what would have happened if we'd chosen differently</span></div>
+        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Counterfactual simulation</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>what would have happened if we'd chosen differently</span><SimTag /></div>
         <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:600px;margin:0 0 16px")}>Branch from a historical decision and project the alternate outcome — change-impact analysis for software and AI decisions.</p>
         <div className="card elev-sm" style={css("flex-direction:row;align-items:center;gap:12px;padding:13px 15px;margin-bottom:18px")}>
           <i className="ph ph-flow-arrow" style={css("font-size:18px;color:var(--color-accent-300)")} />

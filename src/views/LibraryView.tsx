@@ -1,5 +1,6 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
+import { SimTag } from "../components/SimTag";
 
 export function LibraryView({ vals }: { vals: Vals }) {
   return (
@@ -8,6 +9,7 @@ export function LibraryView({ vals }: { vals: Vals }) {
         <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}>
           <h3 style={css("margin:0")}>Document library</h3>
           <span style={css("font-size:12px;color:var(--color-neutral-500)")}>artifacts · MinIO · every version linked to its source event</span>
+          <SimTag />
         </div>
         <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:580px;margin:0 0 18px")}>Documents, decision records and artifacts produced across every agent and session. Each is versioned and traces back to the event that created it.</p>
         <div style={css("display:flex;align-items:center;gap:10px;margin-bottom:18px")}>
