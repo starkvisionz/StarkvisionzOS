@@ -10,7 +10,7 @@ export function PrototypeBanner() {
     <div className="proto-banner">
       <i className="ph-fill ph-flask" style={css("font-size:14px;color:#d6c07a;flex:none")} />
       <span>
-        <b>Non-production prototype.</b> Every feature here is simulated — mock data, no backend, no real AI calls, and nothing is deployed. No action performs a real side effect.
+        <b>Prototype.</b> Chat, Timeline, Audit and Dashboard are live — real Claude API + an event-sourced store. The <b>Lab</b> views (graph, loop, nightshift, market, and the rest) are interactive simulations, each labeled <i>Simulated</i>.
       </span>
     </div>
   );

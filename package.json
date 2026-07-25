@@ -1,24 +1,38 @@
 {
-  "name": "starkvisionz-os-prototype",
+  "name": "starkvisionz-os",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Starkvisionz OS (Prototype) — a non-production front-end demo of an event-sourced, multi-agent AI workspace. All data and actions are simulated; there is no backend.",
+  "description": "Starkvisionz OS — an event-sourced, multi-agent AI workspace with a real Claude backend.",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -n web,api -c cyan,magenta \"npm:dev:web\" \"npm:dev:api\"",
+    "dev:web": "vite",
+    "dev:api": "tsx watch server/index.ts",
     "build": "tsc -b && vite build",
+    "start": "node --import tsx server/index.ts",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit"
+    "verify:events": "tsx server/verifyEvents.ts",
+    "typecheck": "tsc -b --noEmit && tsc -p server/tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
     "@phosphor-icons/web": "^2.1.1",
+    "better-sqlite3": "^11.8.1",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.5",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.2",
     "typescript": "^5.6.3",
     "vite": "^5.4.11"
   }

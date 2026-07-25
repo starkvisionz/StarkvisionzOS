@@ -54,6 +54,9 @@ export interface TimelineEvent {
   icon: string;
   dot: string;
   fresh?: boolean;
+  cost?: number;
+  approval?: string;
+  createdAt?: string;
 }
 
 /** A block inside an assistant message. */
@@ -83,6 +86,28 @@ export interface Message {
   cost?: string;
   blocks: Block[];
   files?: { name: string; icon: string }[];
+  // backend-backed extras (real chat)
+  tokens?: number;
+  usd?: number;
+  agentName?: string;
+  agentIcon?: string;
+  agentDot?: string;
+}
+
+export interface ChatModel {
+  id: string;
+  name: string;
+  sub: string;
+  dot: string;
+}
+
+export interface DashProj {
+  spend: number;
+  messages: number;
+  tokens: number;
+  sessions: number;
+  spendDays: { day: string; date: string; spend: number }[];
+  apiKey: boolean;
 }
 
 export interface Repo {
@@ -182,4 +207,10 @@ export interface State {
   cfRunning: boolean;
   cfDone: boolean;
   marketCat: string;
+  // ── backend-backed chat + projections ──
+  chatModels: ChatModel[];
+  apiKey: boolean;
+  booted: boolean;
+  dash: DashProj | null;
+  needsAuth: boolean;
 }

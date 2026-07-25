@@ -1,6 +1,5 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
-import { SimTag } from "../components/SimTag";
 
 export function TimelineView({ vals }: { vals: Vals }) {
   return (
@@ -9,7 +8,6 @@ export function TimelineView({ vals }: { vals: Vals }) {
         <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:22px")}>
           <h3 style={css("margin:0")}>Project timeline</h3>
           <span style={css("font-size:12px;color:var(--color-neutral-500)")}>prj_stark_os · immutable event stream</span>
-          <SimTag />
 
           <div style={css("margin-left:auto;display:flex;align-items:center;gap:10px")}>
             <span style={css(`display:inline-flex;align-items:center;gap:6px;font-size:11px;color:${vals.liveColor}`)}>
