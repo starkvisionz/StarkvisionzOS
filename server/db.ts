@@ -117,7 +117,8 @@ export interface DomainEvent {
     | "nightshift.filed"
     | "replay.done"
     | "branches.forked"
-    | "blindspots.scanned";
+    | "blindspots.scanned"
+    | "counterfactual.ran";
   actor: string;
   summary: string;
   icon?: string;
@@ -270,6 +271,10 @@ export function logBranches(actor: string, summary: string, cost: number): void 
 
 export function logBlindspots(actor: string, summary: string, cost: number): void {
   emit([{ type: "blindspots.scanned", actor, summary, icon: "ph ph-question", dot: "#d6c07a", cost, payload: {} }]);
+}
+
+export function logCounterfactual(actor: string, summary: string, cost: number): void {
+  emit([{ type: "counterfactual.ran", actor, summary, icon: "ph ph-flow-arrow", dot: "var(--color-accent-300)", cost, payload: {} }]);
 }
 
 // ── reads ──

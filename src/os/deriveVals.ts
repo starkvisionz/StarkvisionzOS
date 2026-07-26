@@ -840,16 +840,27 @@ export function deriveVals(s: State, a: Actions) {
     }
   }
 
-  // ── counterfactual ──
-  const cfMetrics = CF_METRICS.map((m) => ({
-    k: m.k,
-    baseV: m.base,
-    altV: m.alt,
-    baseW: m.baseW,
-    altW: m.altW,
-    delta: m.delta,
-    deltaColor: m.good ? "var(--color-accent-300)" : "#d6bd8f",
-  }));
+  // ── counterfactual (real: Claude projects the alternate outcome) ──
+  const hasRealCf = s.cfMetricsReal.length > 0;
+  const cfMetrics = hasRealCf
+    ? s.cfMetricsReal.map((m) => ({
+        k: m.k,
+        baseV: m.base,
+        altV: m.alt,
+        baseW: m.baseW + "%",
+        altW: m.altW + "%",
+        delta: m.delta,
+        deltaColor: m.good ? "var(--color-accent-300)" : "#d6bd8f",
+      }))
+    : CF_METRICS.map((m) => ({
+        k: m.k,
+        baseV: m.base,
+        altV: m.alt,
+        baseW: m.baseW,
+        altW: m.altW,
+        delta: m.delta,
+        deltaColor: m.good ? "var(--color-accent-300)" : "#d6bd8f",
+      }));
 
   return {
     // loop
@@ -1066,12 +1077,17 @@ export function deriveVals(s: State, a: Actions) {
     recBtnIcon: s.recRunning ? "ph ph-circle-notch" : s.recDone ? "ph ph-arrow-counter-clockwise" : "ph ph-play",
     recSpin: s.recRunning ? "animation:ocspin 1s linear infinite" : "",
     runCounter: () => a.runCounter(),
-    cfDone: s.cfDone,
-    cfPending: !s.cfDone,
+    cfDone: s.cfDone && hasRealCf,
+    cfPending: !hasRealCf && !s.cfError,
+    cfError: s.cfError,
     cfMetrics,
-    cfVerdict: CF_VERDICT,
-    cfBtnLabel: s.cfRunning ? "Simulating…" : s.cfDone ? "Reset" : "Simulate outcome",
-    cfBtnIcon: s.cfRunning ? "ph ph-circle-notch" : s.cfDone ? "ph ph-arrow-counter-clockwise" : "ph ph-flow-arrow",
+    cfVerdict: hasRealCf ? s.cfVerdictReal : CF_VERDICT,
+    cfDecision: s.cfDecision,
+    cfAlternative: s.cfAlternative,
+    onCfDecision: (e: React.ChangeEvent<HTMLInputElement>) => a.setCfDecision(e.target.value),
+    onCfAlternative: (e: React.ChangeEvent<HTMLInputElement>) => a.setCfAlternative(e.target.value),
+    cfBtnLabel: s.cfRunning ? "Simulating…" : hasRealCf ? "Simulate again" : "Simulate outcome",
+    cfBtnIcon: s.cfRunning ? "ph ph-circle-notch" : "ph ph-flow-arrow",
     cfSpin: s.cfRunning ? "animation:ocspin 1s linear infinite" : "",
     isChat: s.view === "chat",
     isDash: s.view === "dash",

@@ -18,7 +18,7 @@ import {
   renameSessionCmd,
 } from "./db.ts";
 import { DEFAULT_MODEL, MODELS, anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
-import { runBlindspots, runBranches, runLoop, runNightshift, runReplay } from "./agents.ts";
+import { runBlindspots, runBranches, runCounterfactual, runLoop, runNightshift, runReplay } from "./agents.ts";
 import {
   ACTOR,
   AUTH_REQUIRED,
@@ -314,6 +314,30 @@ app.post("/api/blindspots/run", rateLimit("agents", CHAT_LIMIT), async (_req: Re
     await runBlindspots(send);
   } catch (err) {
     send("error", { message: err instanceof Error ? err.message : "Blind-spot scan failed." });
+  }
+  res.end();
+});
+
+app.post("/api/counterfactual/run", rateLimit("agents", CHAT_LIMIT), async (req: Request, res: Response) => {
+  const decision = (req.body?.decision ?? "").toString().trim();
+  const alternative = (req.body?.alternative ?? "").toString().trim();
+  sseHeaders(res);
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+  if (!decision || !alternative) {
+    send("error", { message: "Provide both the chosen decision and the alternative to compare." });
+    return res.end();
+  }
+  if (decision.length + alternative.length > MAX_PROMPT_CHARS) {
+    send("error", { message: `Inputs too long (max ${MAX_PROMPT_CHARS} characters combined).` });
+    return res.end();
+  }
+  try {
+    await runCounterfactual(send, decision, alternative);
+  } catch (err) {
+    send("error", { message: err instanceof Error ? err.message : "Counterfactual failed." });
   }
   res.end();
 });

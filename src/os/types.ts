@@ -197,6 +197,16 @@ export interface BlindSpot {
   sev: number;
 }
 
+export interface CfMetric {
+  k: string;
+  base: string;
+  alt: string;
+  baseW: number;
+  altW: number;
+  delta: string;
+  good: boolean;
+}
+
 export interface State {
   view: ViewId;
   pickerOpen: boolean;
@@ -284,4 +294,9 @@ export interface State {
   blindRunning: boolean;
   blindError: string;
   blindReal: BlindSpot[];
+  cfDecision: string;
+  cfAlternative: string;
+  cfError: string;
+  cfMetricsReal: CfMetric[];
+  cfVerdictReal: string;
 }

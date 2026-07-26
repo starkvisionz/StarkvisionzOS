@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BlindSpot, Block, BranchResult, ChatModel, LoopRoundSeed, Message, NightFinding, ReplayDiff, State, TimelineEvent } from "./types";
+import type { BlindSpot, Block, BranchResult, CfMetric, ChatModel, LoopRoundSeed, Message, NightFinding, ReplayDiff, State, TimelineEvent } from "./types";
 import {
   INITIAL_ABOUT,
   INITIAL_LOOP_TASK,
@@ -98,6 +98,11 @@ function initialState(): State {
     blindRunning: false,
     blindError: "",
     blindReal: [],
+    cfDecision: "Next.js + PostgreSQL (a single app framework over one relational store)",
+    cfAlternative: "React + FastAPI (a separate SPA and Python API)",
+    cfError: "",
+    cfMetricsReal: [],
+    cfVerdictReal: "",
   };
 }
 
@@ -206,6 +211,8 @@ export interface Actions {
   setMarketCat(c: string): void;
   runRecovery(): void;
   runCounter(): void;
+  setCfDecision(v: string): void;
+  setCfAlternative(v: string): void;
   runLoop(): void;
   resetLoop(): void;
   improveMore(): void;
@@ -628,14 +635,37 @@ export function useController(): Controller {
         });
       }, 750);
     },
+    setCfDecision(v) {
+      setState({ cfDecision: v });
+    },
+    setCfAlternative(v) {
+      setState({ cfAlternative: v });
+    },
     runCounter() {
       const s = stateRef.current;
-      if (s.cfRunning || s.cfDone) {
-        setState({ cfDone: false });
-        return;
-      }
-      setState({ cfRunning: true, cfDone: false });
-      setTimeout(() => setState({ cfRunning: false, cfDone: true }), 1400);
+      if (s.cfRunning) return;
+      const decision = (s.cfDecision || "").trim();
+      const alternative = (s.cfAlternative || "").trim();
+      if (!decision || !alternative) return;
+      setState({ cfRunning: true, cfDone: false, cfError: "", cfMetricsReal: [], cfVerdictReal: "" });
+      streamSSE("/api/counterfactual/run", { decision, alternative }, (event, data) => {
+        if (event === "done") {
+          const raw = Array.isArray(data.metrics) ? (data.metrics as Record<string, unknown>[]) : [];
+          const metrics: CfMetric[] = raw.map((m) => ({
+            k: String(m.k ?? "Metric"),
+            base: String(m.base ?? "—"),
+            alt: String(m.alt ?? "—"),
+            baseW: Number(m.baseW) || 0,
+            altW: Number(m.altW) || 0,
+            delta: String(m.delta ?? ""),
+            good: !!m.good,
+          }));
+          setState({ cfRunning: false, cfDone: true, cfMetricsReal: metrics, cfVerdictReal: String(data.verdict ?? "") });
+          refreshFeeds();
+        } else if (event === "error") {
+          setState({ cfRunning: false, cfError: String(data.message || "Counterfactual failed.") });
+        }
+      });
     },
     runLoop() {
       const s = stateRef.current;

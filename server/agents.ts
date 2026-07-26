@@ -2,7 +2,7 @@
 // brief. Both call the Anthropic API for real and log a domain event when done.
 
 import { anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
-import { latestExchange, logBlindspots, logBranches, logConverged, logNightshift, logReplay, recentEvents } from "./db.ts";
+import { latestExchange, logBlindspots, logBranches, logConverged, logCounterfactual, logNightshift, logReplay, recentEvents } from "./db.ts";
 
 type Send = (event: string, data: unknown) => void;
 
@@ -338,4 +338,44 @@ export async function runBlindspots(send: Send): Promise<void> {
 
   logBlindspots("hub", `Scanned the event log — ${spots.length} blind spot(s) surfaced`, cost);
   send("spots", { spots, cost });
+}
+
+// ── counterfactual: project the alternate outcome of a decision ──
+export async function runCounterfactual(send: Send, decision: string, alternative: string): Promise<void> {
+  if (!hasApiKey()) {
+    send("error", { message: "No Anthropic API key configured — set ANTHROPIC_API_KEY to run a real counterfactual." });
+    return;
+  }
+  const prompt =
+    `A team CHOSE this option:\n${decision}\n\nThe road not taken (the ALTERNATIVE) was:\n${alternative}\n\n` +
+    `Project the alternate outcome as change-impact analysis. Pick 3-4 metrics that matter for this kind of decision. ` +
+    `For each metric give the chosen option's value and the alternative's value, a relative bar magnitude 0-100 for each (higher = more of that metric), a short signed delta label, and whether the CHOSEN option is better on that metric. ` +
+    `Then give a one-paragraph verdict on whether the chosen option was the right call.\n\n` +
+    `Return ONLY JSON: {"metrics":[{"k":"<metric>","base":"<chosen value>","alt":"<alternative value>","baseW":<0-100>,"altW":<0-100>,"delta":"<short signed label>","good":<true if chosen is better>}],"verdict":"<one paragraph>"}.`;
+  const r = await claudeText(
+    AUTHOR_MODEL,
+    "You are a decision analyst who projects concrete, quantified outcomes. Be realistic and specific. Respond only with the requested JSON.",
+    prompt,
+    1000,
+  );
+  const cost = costFor(AUTHOR_MODEL, r.inTok, r.outTok);
+  const parsed = (extractJson(r.text) || {}) as Record<string, unknown>;
+  const rawMetrics = Array.isArray(parsed.metrics) ? (parsed.metrics as Record<string, unknown>[]) : [];
+  const clampW = (n: unknown) => Math.max(2, Math.min(100, Math.round(Number(n) || 0)));
+  const metrics = rawMetrics
+    .filter((m) => m && typeof m === "object")
+    .map((m) => ({
+      k: String(m.k || "Metric"),
+      base: String(m.base ?? "—"),
+      alt: String(m.alt ?? "—"),
+      baseW: clampW(m.baseW),
+      altW: clampW(m.altW),
+      delta: String(m.delta ?? ""),
+      good: !!m.good,
+    }))
+    .slice(0, 5);
+  const verdict = String(parsed.verdict || r.text.slice(0, 240)).trim();
+
+  logCounterfactual("hub", `Projected a counterfactual across ${metrics.length} metric(s)`, cost);
+  send("done", { metrics, verdict, cost });
 }
