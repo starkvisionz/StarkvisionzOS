@@ -116,7 +116,8 @@ export interface DomainEvent {
     | "loop.converged"
     | "nightshift.filed"
     | "replay.done"
-    | "branches.forked";
+    | "branches.forked"
+    | "blindspots.scanned";
   actor: string;
   summary: string;
   icon?: string;
@@ -265,6 +266,10 @@ export function logReplay(actor: string, summary: string, cost: number): void {
 
 export function logBranches(actor: string, summary: string, cost: number): void {
   emit([{ type: "branches.forked", actor, summary, icon: "ph ph-git-branch", dot: "var(--color-accent-400)", cost, payload: {} }]);
+}
+
+export function logBlindspots(actor: string, summary: string, cost: number): void {
+  emit([{ type: "blindspots.scanned", actor, summary, icon: "ph ph-question", dot: "#d6c07a", cost, payload: {} }]);
 }
 
 // ── reads ──

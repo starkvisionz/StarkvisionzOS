@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Block, BranchResult, ChatModel, LoopRoundSeed, Message, NightFinding, ReplayDiff, State, TimelineEvent } from "./types";
+import type { BlindSpot, Block, BranchResult, ChatModel, LoopRoundSeed, Message, NightFinding, ReplayDiff, State, TimelineEvent } from "./types";
 import {
   INITIAL_ABOUT,
   INITIAL_LOOP_TASK,
@@ -95,6 +95,9 @@ function initialState(): State {
     branchError: "",
     branchReal: [],
     branchRationale: "",
+    blindRunning: false,
+    blindError: "",
+    blindReal: [],
   };
 }
 
@@ -229,6 +232,7 @@ export interface Actions {
   setStake(id: string): void;
   runNeg(): void;
   closeSpot(id: string): void;
+  runBlind(): void;
   runNight(): void;
   reverify(id: string): void;
   reverifyAll(): void;
@@ -813,6 +817,28 @@ export function useController(): Controller {
     },
     closeSpot(id) {
       setState((s) => ({ closedSpots: { ...s.closedSpots, [id]: !s.closedSpots[id] } }));
+    },
+    runBlind() {
+      const s = stateRef.current;
+      if (s.blindRunning) return;
+      setState({ blindRunning: true, blindError: "", blindReal: [], closedSpots: {} });
+      streamSSE("/api/blindspots/run", {}, (event, data) => {
+        if (event === "spots") {
+          const raw = Array.isArray(data.spots) ? (data.spots as Record<string, unknown>[]) : [];
+          const spots: BlindSpot[] = raw.map((b, i) => ({
+            id: String(b.id ?? "bs" + (i + 1)),
+            q: String(b.q ?? "Blind spot"),
+            area: String(b.area ?? "scope"),
+            assumed: String(b.assumed ?? ""),
+            rides: String(b.rides ?? "unknown"),
+            sev: Number(b.sev) || 0,
+          }));
+          setState({ blindRunning: false, blindReal: spots });
+          refreshFeeds();
+        } else if (event === "error") {
+          setState({ blindRunning: false, blindError: String(data.message || "Blind-spot scan failed.") });
+        }
+      });
     },
     runNight() {
       if (stateRef.current.nightRunning) return;

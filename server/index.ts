@@ -18,7 +18,7 @@ import {
   renameSessionCmd,
 } from "./db.ts";
 import { DEFAULT_MODEL, MODELS, anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
-import { runBranches, runLoop, runNightshift, runReplay } from "./agents.ts";
+import { runBlindspots, runBranches, runLoop, runNightshift, runReplay } from "./agents.ts";
 import {
   ACTOR,
   AUTH_REQUIRED,
@@ -300,6 +300,20 @@ app.post("/api/branches/run", rateLimit("agents", CHAT_LIMIT), async (req: Reque
     await runBranches(send, task);
   } catch (err) {
     send("error", { message: err instanceof Error ? err.message : "Branching failed." });
+  }
+  res.end();
+});
+
+app.post("/api/blindspots/run", rateLimit("agents", CHAT_LIMIT), async (_req: Request, res: Response) => {
+  sseHeaders(res);
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+  try {
+    await runBlindspots(send);
+  } catch (err) {
+    send("error", { message: err instanceof Error ? err.message : "Blind-spot scan failed." });
   }
   res.end();
 });

@@ -434,7 +434,7 @@ export function deriveVals(s: State, a: Actions) {
   // ── attention panel ──
   const attention = [
     { label: "Stale claims below threshold", sub: "confidence has decayed past 60%", n: CLAIMS.filter((c) => (s.claimConf[c.id] ?? c.conf) < 60).length, icon: "ph-fill ph-warning-circle", color: "#d68f9a", v: "truth" as const },
-    { label: "Open blind spots", sub: "gaps agents keep filling with guesses", n: BLIND_SPOTS.length - BLIND_SPOTS.filter((b) => s.closedSpots[b.id]).length, icon: "ph ph-question", color: "#d6c07a", v: "blind" as const },
+    { label: "Open blind spots", sub: "gaps agents keep filling with guesses", n: (s.blindReal.length ? s.blindReal : BLIND_SPOTS).filter((b) => !s.closedSpots[b.id]).length, icon: "ph ph-question", color: "#d6c07a", v: "blind" as const },
     { label: "Nightshift items awaiting approval", sub: "drafted, not executed", n: s.nightReal.filter((f) => f.kind === "drafted").length, icon: "ph ph-moon-stars", color: "var(--color-accent)", v: "night" as const },
     { label: "Decisions with high regret", sub: "confident calls that did not hold", n: REGRET_ROWS.filter((r) => r.good === false).length, icon: "ph ph-scales", color: "#d68f9a", v: "regret" as const },
   ].map((at) => ({ ...at, bg: "color-mix(in srgb," + at.color + " 18%,transparent)", onClick: () => a.switchView(at.v) }));
@@ -496,8 +496,12 @@ export function deriveVals(s: State, a: Actions) {
       ? "settled — terms below, awaiting your acceptance"
       : "4 scoring rounds, no convergence — scores moved less than 1 point";
 
-  // ── blind spot map ──
-  const blindSpots = BLIND_SPOTS.map((b) => {
+  // ── blind spot map (real: Claude scans the event log for gaps + assumptions) ──
+  const hasRealBlind = s.blindReal.length > 0;
+  const blindSource: { id: string; q: string; area: string; areaTone: string; assumed: string; rides: string; sev: number; hits?: number }[] = hasRealBlind
+    ? s.blindReal.map((b) => ({ id: b.id, q: b.q, area: b.area, areaTone: b.sev >= 70 ? "warn" : "plain", assumed: b.assumed, rides: b.rides, sev: b.sev }))
+    : BLIND_SPOTS;
+  const blindSpots = blindSource.map((b) => {
     const closed = !!s.closedSpots[b.id];
     const color = closed ? "var(--color-neutral-500)" : b.sev >= 75 ? "#d68f9a" : b.sev >= 50 ? "#d6c07a" : "var(--color-neutral-400)";
     return {
@@ -505,6 +509,7 @@ export function deriveVals(s: State, a: Actions) {
       area: b.area,
       assumed: b.assumed,
       hits: b.hits,
+      hasHits: typeof b.hits === "number",
       rides: b.rides,
       color,
       bar: b.sev + "%",
@@ -520,7 +525,7 @@ export function deriveVals(s: State, a: Actions) {
       onClose: () => a.closeSpot(b.id),
     };
   });
-  const blindClosedN = BLIND_SPOTS.filter((b) => s.closedSpots[b.id]).length;
+  const blindClosedN = blindSource.filter((b) => s.closedSpots[b.id]).length;
 
   // ── truth decay ──
   const claims = CLAIMS.map((c) => {
@@ -615,6 +620,7 @@ export function deriveVals(s: State, a: Actions) {
       .filter((r) => r.id !== s.repoId)
       .map((r) => ({ label: "Scope agents to " + r.name, icon: "ph ph-git-branch", kind: "repo", run: () => a.selectRepo(r.id) })),
     { label: "Run a nightshift", icon: "ph ph-moon-stars", kind: "action", run: () => { a.switchView("night"); a.runNight(); } },
+    { label: "Scan for blind spots", icon: "ph ph-radar", kind: "action", run: () => { a.switchView("blind"); a.runBlind(); } },
     { label: "Settle a deadlock by negotiation", icon: "ph ph-handshake", kind: "action", run: () => { a.switchView("negotiate"); a.runNeg(); } },
     { label: "Raise stakes to production", icon: "ph ph-gauge", kind: "action", run: () => { a.switchView("dash"); a.setStake("money"); } },
     { label: "Re-verify stale claims", icon: "ph ph-hourglass-medium", kind: "action", run: () => { a.switchView("truth"); a.reverifyAll(); } },
@@ -908,9 +914,16 @@ export function deriveVals(s: State, a: Actions) {
     negBtnIcon: s.negRunning ? "ph ph-circle-notch" : "ph ph-door-open",
     negSpin: s.negRunning ? "animation:ocspin 1s linear infinite" : "",
     blindSpots,
-    blindOpen: BLIND_SPOTS.length - blindClosedN,
-    blindGuesses: 38,
+    blindOpen: blindSource.length - blindClosedN,
+    blindGuesses: blindSource.length,
     blindClosed: blindClosedN,
+    blindHasReal: hasRealBlind,
+    blindError: s.blindError,
+    blindEmpty: !hasRealBlind && !s.blindError,
+    runBlind: () => a.runBlind(),
+    blindBtnLabel: s.blindRunning ? "Scanning…" : hasRealBlind ? "Scan again" : "Scan the log",
+    blindBtnIcon: s.blindRunning ? "ph ph-circle-notch" : "ph ph-radar",
+    blindSpin: s.blindRunning ? "animation:ocspin 1s linear infinite" : "",
     claims,
     truthAvg,
     truthStale,

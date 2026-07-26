@@ -2,7 +2,7 @@
 // brief. Both call the Anthropic API for real and log a domain event when done.
 
 import { anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
-import { latestExchange, logBranches, logConverged, logNightshift, logReplay, recentEvents } from "./db.ts";
+import { latestExchange, logBlindspots, logBranches, logConverged, logNightshift, logReplay, recentEvents } from "./db.ts";
 
 type Send = (event: string, data: unknown) => void;
 
@@ -300,4 +300,42 @@ export async function runBranches(send: Send, task: string): Promise<void> {
 
   logBranches("hub", `Forked ${branches.length} agent branches for a decision`, cost);
   send("branches", { branches: branches.map((b) => ({ ...b, recommended: b.id === recommended })), recommended, rationale, cost });
+}
+
+// ── blind spot map: have Claude surface gaps + unverified assumptions from the log ──
+export async function runBlindspots(send: Send): Promise<void> {
+  if (!hasApiKey()) {
+    send("error", { message: "No Anthropic API key configured — set ANTHROPIC_API_KEY to scan the event log for blind spots." });
+    return;
+  }
+  const events = recentEvents(40);
+  const log = events.length ? events.map((e) => `- ${e.type}: ${e.summary}`).join("\n") : "(no activity recorded yet)";
+  const prompt =
+    `You are auditing an AI workspace for blind spots — questions the system is quietly assuming an answer to, and gaps it keeps filling with guesses. Here is the recent activity log:\n\n${log}\n\n` +
+    `Surface 3-5 blind spots. For each, name the open question, the area it touches, what is currently being assumed, what depends on it, and a severity 0-100. ` +
+    `If the log is sparse, infer plausible blind spots for an event-sourced AI workspace and say so in the "assumed" text. ` +
+    `Return ONLY JSON: an array of {"q": "<question>", "area": "<one short word: infra|policy|cost|data|scope|security>", "assumed": "<1-2 sentences>", "rides": "<what depends on it>", "sev": <integer 0-100>}.`;
+  const r = await claudeText(AUTHOR_MODEL, "You are a rigorous auditor who names hidden assumptions precisely. Respond only with the requested JSON.", prompt, 900);
+  const cost = costFor(AUTHOR_MODEL, r.inTok, r.outTok);
+  const parsed = extractJson(r.text);
+  const spots = Array.isArray(parsed)
+    ? parsed
+        .filter((x) => x && typeof x === "object")
+        .map((x, i) => {
+          const o = x as Record<string, unknown>;
+          const sev = Math.max(0, Math.min(100, Math.round(Number(o.sev ?? 50))));
+          return {
+            id: "bs" + (i + 1),
+            q: String(o.q || "Unnamed blind spot"),
+            area: String(o.area || "scope").toLowerCase().slice(0, 12),
+            assumed: String(o.assumed || ""),
+            rides: String(o.rides || "unknown"),
+            sev,
+          };
+        })
+        .slice(0, 5)
+    : [];
+
+  logBlindspots("hub", `Scanned the event log — ${spots.length} blind spot(s) surfaced`, cost);
+  send("spots", { spots, cost });
 }

@@ -188,6 +188,15 @@ export interface BranchResult {
   recommended: boolean;
 }
 
+export interface BlindSpot {
+  id: string;
+  q: string;
+  area: string;
+  assumed: string;
+  rides: string;
+  sev: number;
+}
+
 export interface State {
   view: ViewId;
   pickerOpen: boolean;
@@ -272,4 +281,7 @@ export interface State {
   branchError: string;
   branchReal: BranchResult[];
   branchRationale: string;
+  blindRunning: boolean;
+  blindError: string;
+  blindReal: BlindSpot[];
 }
