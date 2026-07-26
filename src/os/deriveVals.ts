@@ -25,7 +25,6 @@ import {
   RECOVERY_STEPS,
   REGRET_AGENTS,
   REGRET_ROWS,
-  REPLAY_DIFFS,
   SPEND,
   STAKES,
 } from "./labdata";
@@ -435,7 +434,7 @@ export function deriveVals(s: State, a: Actions) {
   // ── attention panel ──
   const attention = [
     { label: "Stale claims below threshold", sub: "confidence has decayed past 60%", n: CLAIMS.filter((c) => (s.claimConf[c.id] ?? c.conf) < 60).length, icon: "ph-fill ph-warning-circle", color: "#d68f9a", v: "truth" as const },
-    { label: "Open blind spots", sub: "gaps agents keep filling with guesses", n: BLIND_SPOTS.length - BLIND_SPOTS.filter((b) => s.closedSpots[b.id]).length, icon: "ph ph-question", color: "#d6c07a", v: "blind" as const },
+    { label: "Open blind spots", sub: "gaps agents keep filling with guesses", n: (s.blindReal.length ? s.blindReal : BLIND_SPOTS).filter((b) => !s.closedSpots[b.id]).length, icon: "ph ph-question", color: "#d6c07a", v: "blind" as const },
     { label: "Nightshift items awaiting approval", sub: "drafted, not executed", n: s.nightReal.filter((f) => f.kind === "drafted").length, icon: "ph ph-moon-stars", color: "var(--color-accent)", v: "night" as const },
     { label: "Decisions with high regret", sub: "confident calls that did not hold", n: REGRET_ROWS.filter((r) => r.good === false).length, icon: "ph ph-scales", color: "#d68f9a", v: "regret" as const },
   ].map((at) => ({ ...at, bg: "color-mix(in srgb," + at.color + " 18%,transparent)", onClick: () => a.switchView(at.v) }));
@@ -497,8 +496,12 @@ export function deriveVals(s: State, a: Actions) {
       ? "settled — terms below, awaiting your acceptance"
       : "4 scoring rounds, no convergence — scores moved less than 1 point";
 
-  // ── blind spot map ──
-  const blindSpots = BLIND_SPOTS.map((b) => {
+  // ── blind spot map (real: Claude scans the event log for gaps + assumptions) ──
+  const hasRealBlind = s.blindReal.length > 0;
+  const blindSource: { id: string; q: string; area: string; areaTone: string; assumed: string; rides: string; sev: number; hits?: number }[] = hasRealBlind
+    ? s.blindReal.map((b) => ({ id: b.id, q: b.q, area: b.area, areaTone: b.sev >= 70 ? "warn" : "plain", assumed: b.assumed, rides: b.rides, sev: b.sev }))
+    : BLIND_SPOTS;
+  const blindSpots = blindSource.map((b) => {
     const closed = !!s.closedSpots[b.id];
     const color = closed ? "var(--color-neutral-500)" : b.sev >= 75 ? "#d68f9a" : b.sev >= 50 ? "#d6c07a" : "var(--color-neutral-400)";
     return {
@@ -506,6 +509,7 @@ export function deriveVals(s: State, a: Actions) {
       area: b.area,
       assumed: b.assumed,
       hits: b.hits,
+      hasHits: typeof b.hits === "number",
       rides: b.rides,
       color,
       bar: b.sev + "%",
@@ -521,7 +525,7 @@ export function deriveVals(s: State, a: Actions) {
       onClose: () => a.closeSpot(b.id),
     };
   });
-  const blindClosedN = BLIND_SPOTS.filter((b) => s.closedSpots[b.id]).length;
+  const blindClosedN = blindSource.filter((b) => s.closedSpots[b.id]).length;
 
   // ── truth decay ──
   const claims = CLAIMS.map((c) => {
@@ -616,6 +620,7 @@ export function deriveVals(s: State, a: Actions) {
       .filter((r) => r.id !== s.repoId)
       .map((r) => ({ label: "Scope agents to " + r.name, icon: "ph ph-git-branch", kind: "repo", run: () => a.selectRepo(r.id) })),
     { label: "Run a nightshift", icon: "ph ph-moon-stars", kind: "action", run: () => { a.switchView("night"); a.runNight(); } },
+    { label: "Scan for blind spots", icon: "ph ph-radar", kind: "action", run: () => { a.switchView("blind"); a.runBlind(); } },
     { label: "Settle a deadlock by negotiation", icon: "ph ph-handshake", kind: "action", run: () => { a.switchView("negotiate"); a.runNeg(); } },
     { label: "Raise stakes to production", icon: "ph ph-gauge", kind: "action", run: () => { a.switchView("dash"); a.setStake("money"); } },
     { label: "Re-verify stale claims", icon: "ph ph-hourglass-medium", kind: "action", run: () => { a.switchView("truth"); a.reverifyAll(); } },
@@ -725,26 +730,57 @@ export function deriveVals(s: State, a: Actions) {
     arrow: i < GQ.path.length - 1,
   }));
 
-  // ── agent branches ──
+  // ── agent branches (real: three Claude personas draft candidate approaches) ──
   const mcolor = (t: string) => (t === "good" ? "var(--color-accent-300)" : t === "warn" ? "#d6bd8f" : t === "bad" ? "#d68f9a" : "var(--color-neutral-200)");
-  const branches = BRANCHES.map((b) => {
-    const isM = s.mergedBranch === b.id;
-    return {
-      letter: b.letter,
-      title: b.title,
-      agent: b.agent,
-      agentIcon: b.agentIcon,
-      recommended: b.recommended,
-      border: b.recommended ? "var(--color-accent-500)" : "var(--color-divider)",
-      badgeBg: b.recommended ? "var(--color-accent)" : "var(--color-neutral-800)",
-      badgeFg: b.recommended ? "#0a0c14" : "var(--color-neutral-200)",
-      metrics: b.metrics.map(([k, v, t]) => ({ k, v, color: mcolor(t) })),
-      btnClass: isM ? "btn-secondary" : b.recommended ? "btn-primary" : "btn-secondary",
-      btnIcon: isM ? "ph ph-check" : "ph ph-git-merge",
-      btnLabel: isM ? "Merged" : "Merge this",
-      onMerge: () => a.mergeBranch(b.id),
-    };
-  });
+  const hasRealBranches = s.branchReal.length > 0;
+  const minBranchCost = hasRealBranches ? Math.min(...s.branchReal.map((b) => b.cost)) : 0;
+  const maxBranchCost = hasRealBranches ? Math.max(...s.branchReal.map((b) => b.cost)) : 0;
+  const effortTone = (e: string) => (e === "S" ? "good" : e === "L" ? "warn" : "");
+  const riskTone = (r: string) => (r === "Low" ? "good" : r === "High" ? "bad" : "warn");
+  const branches = hasRealBranches
+    ? s.branchReal.map((b) => {
+        const isM = s.mergedBranch === b.id;
+        const costTone = b.cost <= minBranchCost ? "good" : b.cost >= maxBranchCost && maxBranchCost > minBranchCost ? "warn" : "";
+        return {
+          letter: b.letter,
+          title: b.title,
+          agent: b.persona,
+          agentIcon: b.personaIcon,
+          recommended: b.recommended,
+          summary: b.summary,
+          border: b.recommended ? "var(--color-accent-500)" : "var(--color-divider)",
+          badgeBg: b.recommended ? "var(--color-accent)" : "var(--color-neutral-800)",
+          badgeFg: b.recommended ? "#0a0c14" : "var(--color-neutral-200)",
+          metrics: [
+            { k: "Effort", v: b.effort === "S" ? "Small" : b.effort === "L" ? "Large" : "Medium", color: mcolor(effortTone(b.effort)) },
+            { k: "Risk", v: b.risk, color: mcolor(riskTone(b.risk)) },
+            { k: "Draft cost", v: "$" + b.cost.toFixed(4), color: mcolor(costTone) },
+          ],
+          btnClass: isM ? "btn-secondary" : b.recommended ? "btn-primary" : "btn-secondary",
+          btnIcon: isM ? "ph ph-check" : "ph ph-git-merge",
+          btnLabel: isM ? "Merged" : "Merge this",
+          onMerge: () => a.mergeBranch(b.id),
+        };
+      })
+    : BRANCHES.map((b) => {
+        const isM = s.mergedBranch === b.id;
+        return {
+          letter: b.letter,
+          title: b.title,
+          agent: b.agent,
+          agentIcon: b.agentIcon,
+          recommended: b.recommended,
+          summary: "",
+          border: b.recommended ? "var(--color-accent-500)" : "var(--color-divider)",
+          badgeBg: b.recommended ? "var(--color-accent)" : "var(--color-neutral-800)",
+          badgeFg: b.recommended ? "#0a0c14" : "var(--color-neutral-200)",
+          metrics: b.metrics.map(([k, v, t]) => ({ k, v, color: mcolor(t) })),
+          btnClass: isM ? "btn-secondary" : b.recommended ? "btn-primary" : "btn-secondary",
+          btnIcon: isM ? "ph ph-check" : "ph ph-git-merge",
+          btnLabel: isM ? "Merged" : "Merge this",
+          onMerge: () => a.mergeBranch(b.id),
+        };
+      });
 
   // ── agent market ──
   const marketCats = ["Coding", "Research", "Deploy", "Summarize"].map((c) => ({
@@ -788,6 +824,21 @@ export function deriveVals(s: State, a: Actions) {
       status: isDone ? "done" : isActive ? "running" : "queued",
     };
   });
+
+  // ── model replay (real): cost comparison between original and replayed turn ──
+  let replayCostDelta = "";
+  if (s.replayDone && s.replayOrig && s.replayNew) {
+    const o = s.replayOrig.cost;
+    const n = s.replayNew.cost;
+    if (o > 0 && n > 0) {
+      const ratio = o / n;
+      replayCostDelta = ratio >= 1.05 ? ratio.toFixed(1) + "× cheaper" : n / o >= 1.05 ? (n / o).toFixed(1) + "× pricier" : "about the same cost";
+    } else if (n > 0) {
+      replayCostDelta = "$" + n.toFixed(4) + " this run";
+    } else {
+      replayCostDelta = "no cost recorded";
+    }
+  }
 
   // ── counterfactual ──
   const cfMetrics = CF_METRICS.map((m) => ({
@@ -863,9 +914,16 @@ export function deriveVals(s: State, a: Actions) {
     negBtnIcon: s.negRunning ? "ph ph-circle-notch" : "ph ph-door-open",
     negSpin: s.negRunning ? "animation:ocspin 1s linear infinite" : "",
     blindSpots,
-    blindOpen: BLIND_SPOTS.length - blindClosedN,
-    blindGuesses: 38,
+    blindOpen: blindSource.length - blindClosedN,
+    blindGuesses: blindSource.length,
     blindClosed: blindClosedN,
+    blindHasReal: hasRealBlind,
+    blindError: s.blindError,
+    blindEmpty: !hasRealBlind && !s.blindError,
+    runBlind: () => a.runBlind(),
+    blindBtnLabel: s.blindRunning ? "Scanning…" : hasRealBlind ? "Scan again" : "Scan the log",
+    blindBtnIcon: s.blindRunning ? "ph ph-circle-notch" : "ph ph-radar",
+    blindSpin: s.blindRunning ? "animation:ocspin 1s linear infinite" : "",
     claims,
     truthAvg,
     truthStale,
@@ -963,14 +1021,42 @@ export function deriveVals(s: State, a: Actions) {
     goRiskTab: () => { a.switchView("settings"); a.setSettingsTab("risk"); },
     stakeSummary: stake.policy[1][1] + " reviewer(s) · " + stake.policy[2][1].toLowerCase() + " gated · " + stake.policy[0][1],
     branches,
+    branchTask: s.branchTask,
+    onBranchTask: (e: React.ChangeEvent<HTMLInputElement>) => a.setBranchTask(e.target.value),
+    runBranches: () => a.runBranches(),
+    branchError: s.branchError,
+    branchHasReal: hasRealBranches,
+    branchRationale: s.branchRationale,
+    branchEmpty: !hasRealBranches && !s.branchError,
+    branchBtnLabel: s.branchRunning ? "Forking…" : hasRealBranches ? "Fork again" : "Fork branches",
+    branchBtnIcon: s.branchRunning ? "ph ph-circle-notch" : "ph ph-git-branch",
+    branchSpin: s.branchRunning ? "animation:ocspin 1s linear infinite" : "",
     runReplay: () => a.runReplay(),
     replayDone: s.replayDone,
-    replayPending: !s.replayDone,
-    replayHint: s.replayRunning ? "Replaying through Claude 4.5…" : "Run replay to compare",
-    replayBtnLabel: s.replayRunning ? "Replaying…" : s.replayDone ? "Reset" : "Replay through Claude 4.5",
+    replayError: s.replayError,
+    replayHasOrig: !!s.replayOrig,
+    replayPrompt: s.replayPrompt,
+    replayPromptShort: s.replayPrompt.length > 96 ? s.replayPrompt.slice(0, 96).trimEnd() + "…" : s.replayPrompt,
+    replayOrigContent: s.replayOrig?.content || "",
+    replayOrigModel: s.replayOrig?.modelName || "",
+    replayOrigDot: s.replayOrig?.dot || "var(--color-neutral-400)",
+    replayOrigCost: s.replayOrig ? "$" + s.replayOrig.cost.toFixed(4) : "—",
+    replayNewText: s.replayNewText,
+    replayNewModel: s.replayNew?.modelName || "",
+    replayNewDot: s.replayNew?.dot || "var(--color-accent)",
+    replayNewCost: s.replayNew ? "$" + s.replayNew.cost.toFixed(4) : "—",
+    replayStreaming: s.replayRunning && !!s.replayOrig && !s.replayDone,
+    replayCostDelta: replayCostDelta,
+    replayDiffs: s.replayReal.map((d) => {
+      const c = d.kind === "add" ? "var(--color-accent-300)" : d.kind === "drop" ? "#d68f9a" : "#d6c07a";
+      const icon = d.kind === "add" ? "ph ph-plus-circle" : d.kind === "drop" ? "ph ph-minus-circle" : "ph ph-arrows-left-right";
+      return { kind: d.kind, text: d.text, color: c, icon };
+    }),
+    replayPending: !s.replayOrig && !s.replayError,
+    replayHint: s.replayRunning ? "Replaying the last real turn through another model…" : "Run replay to compare the last chat turn across models",
+    replayBtnLabel: s.replayRunning ? "Replaying…" : s.replayDone ? "Replay again" : "Replay last turn",
     replayBtnIcon: s.replayRunning ? "ph ph-circle-notch" : s.replayDone ? "ph ph-arrow-counter-clockwise" : "ph ph-clock-clockwise",
     replaySpin: s.replayRunning ? "animation:ocspin 1s linear infinite" : "",
-    replayDiffs: REPLAY_DIFFS,
     marketCats,
     marketRows,
     recSteps,

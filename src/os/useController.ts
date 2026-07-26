@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Block, ChatModel, LoopRoundSeed, Message, NightFinding, State, TimelineEvent } from "./types";
+import type { BlindSpot, Block, BranchResult, ChatModel, LoopRoundSeed, Message, NightFinding, ReplayDiff, State, TimelineEvent } from "./types";
 import {
   INITIAL_ABOUT,
   INITIAL_LOOP_TASK,
@@ -84,6 +84,20 @@ function initialState(): State {
     loopError: "",
     nightReal: [],
     nightError: "",
+    replayError: "",
+    replayPrompt: "",
+    replayOrig: null,
+    replayNew: null,
+    replayNewText: "",
+    replayReal: [],
+    branchTask: "Choose the primary datastore and framework for the event hub.",
+    branchRunning: false,
+    branchError: "",
+    branchReal: [],
+    branchRationale: "",
+    blindRunning: false,
+    blindError: "",
+    blindReal: [],
   };
 }
 
@@ -187,6 +201,8 @@ export interface Actions {
   setHalf(v: number): void;
   runReplay(): void;
   mergeBranch(id: string): void;
+  runBranches(): void;
+  setBranchTask(v: string): void;
   setMarketCat(c: string): void;
   runRecovery(): void;
   runCounter(): void;
@@ -216,6 +232,7 @@ export interface Actions {
   setStake(id: string): void;
   runNeg(): void;
   closeSpot(id: string): void;
+  runBlind(): void;
   runNight(): void;
   reverify(id: string): void;
   reverifyAll(): void;
@@ -513,15 +530,87 @@ export function useController(): Controller {
     },
     runReplay() {
       const s = stateRef.current;
-      if (s.replayRunning || s.replayDone) {
-        setState({ replayDone: false, replayRunning: false });
-        return;
-      }
-      setState({ replayRunning: true, replayDone: false });
-      setTimeout(() => setState({ replayRunning: false, replayDone: true }), 1500);
+      if (s.replayRunning) return;
+      setState({
+        replayRunning: true,
+        replayDone: false,
+        replayError: "",
+        replayPrompt: "",
+        replayOrig: null,
+        replayNew: null,
+        replayNewText: "",
+        replayReal: [],
+      });
+      streamSSE("/api/replay/run", {}, (event, data) => {
+        if (event === "original") {
+          setState({
+            replayPrompt: String(data.prompt ?? ""),
+            replayOrig: {
+              content: String(data.content ?? ""),
+              model: String(data.model ?? ""),
+              modelName: String(data.modelName ?? "Claude"),
+              dot: String(data.dot ?? "var(--color-neutral-400)"),
+              cost: Number(data.cost) || 0,
+            },
+          });
+        } else if (event === "token") {
+          const t = String((data as { text?: string }).text ?? "");
+          setState((st) => ({ replayNewText: st.replayNewText + t }));
+        } else if (event === "done") {
+          const rawDiffs = Array.isArray(data.diffs) ? (data.diffs as Record<string, unknown>[]) : [];
+          const diffs: ReplayDiff[] = rawDiffs.map((d) => ({ kind: String(d.kind ?? "change"), text: String(d.text ?? "") }));
+          setState((st) => ({
+            replayRunning: false,
+            replayDone: true,
+            replayReal: diffs,
+            replayNew: {
+              content: String(data.content ?? st.replayNewText),
+              model: String(data.model ?? ""),
+              modelName: String(data.modelName ?? "Claude"),
+              dot: String(data.dot ?? "var(--color-accent)"),
+              cost: Number(data.cost) || 0,
+            },
+          }));
+          refreshFeeds();
+        } else if (event === "error") {
+          setState({ replayRunning: false, replayError: String(data.message || "Replay failed.") });
+        }
+      });
     },
     mergeBranch(id) {
       setState({ mergedBranch: id });
+    },
+    setBranchTask(v) {
+      setState({ branchTask: v });
+    },
+    runBranches() {
+      const s = stateRef.current;
+      if (s.branchRunning) return;
+      const task = (s.branchTask || "").trim();
+      if (!task) return;
+      setState({ branchRunning: true, branchError: "", branchReal: [], branchRationale: "", mergedBranch: null });
+      streamSSE("/api/branches/run", { task }, (event, data) => {
+        if (event === "branches") {
+          const raw = Array.isArray(data.branches) ? (data.branches as Record<string, unknown>[]) : [];
+          const branches: BranchResult[] = raw.map((b) => ({
+            id: String(b.id ?? ""),
+            letter: String(b.letter ?? "?"),
+            persona: String(b.persona ?? "Agent"),
+            personaIcon: String(b.personaIcon ?? "ph ph-robot"),
+            personaDot: String(b.personaDot ?? "var(--color-accent)"),
+            title: String(b.title ?? "Approach"),
+            summary: String(b.summary ?? ""),
+            effort: String(b.effort ?? "M"),
+            risk: String(b.risk ?? "Medium"),
+            cost: Number(b.cost) || 0,
+            recommended: !!b.recommended,
+          }));
+          setState({ branchRunning: false, branchReal: branches, branchRationale: String(data.rationale ?? "") });
+          refreshFeeds();
+        } else if (event === "error") {
+          setState({ branchRunning: false, branchError: String(data.message || "Branching failed.") });
+        }
+      });
     },
     setMarketCat(c) {
       setState({ marketCat: c });
@@ -728,6 +817,28 @@ export function useController(): Controller {
     },
     closeSpot(id) {
       setState((s) => ({ closedSpots: { ...s.closedSpots, [id]: !s.closedSpots[id] } }));
+    },
+    runBlind() {
+      const s = stateRef.current;
+      if (s.blindRunning) return;
+      setState({ blindRunning: true, blindError: "", blindReal: [], closedSpots: {} });
+      streamSSE("/api/blindspots/run", {}, (event, data) => {
+        if (event === "spots") {
+          const raw = Array.isArray(data.spots) ? (data.spots as Record<string, unknown>[]) : [];
+          const spots: BlindSpot[] = raw.map((b, i) => ({
+            id: String(b.id ?? "bs" + (i + 1)),
+            q: String(b.q ?? "Blind spot"),
+            area: String(b.area ?? "scope"),
+            assumed: String(b.assumed ?? ""),
+            rides: String(b.rides ?? "unknown"),
+            sev: Number(b.sev) || 0,
+          }));
+          setState({ blindRunning: false, blindReal: spots });
+          refreshFeeds();
+        } else if (event === "error") {
+          setState({ blindRunning: false, blindError: String(data.message || "Blind-spot scan failed.") });
+        }
+      });
     },
     runNight() {
       if (stateRef.current.nightRunning) return;

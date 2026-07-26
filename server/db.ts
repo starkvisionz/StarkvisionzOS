@@ -114,7 +114,10 @@ export interface DomainEvent {
     | "message.created"
     | "settings.updated"
     | "loop.converged"
-    | "nightshift.filed";
+    | "nightshift.filed"
+    | "replay.done"
+    | "branches.forked"
+    | "blindspots.scanned";
   actor: string;
   summary: string;
   icon?: string;
@@ -257,6 +260,18 @@ export function logNightshift(actor: string, summary: string): void {
   emit([{ type: "nightshift.filed", actor, summary, icon: "ph ph-moon-stars", dot: "var(--color-accent)", payload: {} }]);
 }
 
+export function logReplay(actor: string, summary: string, cost: number): void {
+  emit([{ type: "replay.done", actor, summary, icon: "ph ph-clock-clockwise", dot: "var(--color-accent-300)", cost, payload: {} }]);
+}
+
+export function logBranches(actor: string, summary: string, cost: number): void {
+  emit([{ type: "branches.forked", actor, summary, icon: "ph ph-git-branch", dot: "var(--color-accent-400)", cost, payload: {} }]);
+}
+
+export function logBlindspots(actor: string, summary: string, cost: number): void {
+  emit([{ type: "blindspots.scanned", actor, summary, icon: "ph ph-question", dot: "#d6c07a", cost, payload: {} }]);
+}
+
 // ── reads ──
 export interface EventRow {
   id: string;
@@ -330,6 +345,21 @@ export function historyForModel(sessionId: string): { role: "user" | "assistant"
   return listMessages(sessionId)
     .filter((m) => m.content.trim().length > 0)
     .map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content }));
+}
+
+/** The most recent real user→assistant exchange, for model replay. Returns the
+ *  user prompt and the original assistant answer (with its model + cost), or
+ *  null if there is no completed exchange to replay yet. */
+export function latestExchange(): { prompt: string; original: MessageRow } | null {
+  const asst = db
+    .prepare(`SELECT * FROM messages WHERE role='assistant' AND trim(content) != '' ORDER BY created_at DESC LIMIT 1`)
+    .get() as MessageRow | undefined;
+  if (!asst) return null;
+  const user = db
+    .prepare(`SELECT * FROM messages WHERE session_id=? AND role='user' AND created_at <= ? AND trim(content) != '' ORDER BY created_at DESC LIMIT 1`)
+    .get(asst.session_id, asst.created_at) as MessageRow | undefined;
+  if (!user) return null;
+  return { prompt: user.content, original: asst };
 }
 
 /** Dashboard aggregates — computed from the immutable event log, NOT the

@@ -1,8 +1,8 @@
 // Real, Claude-powered "Lab" features: the multi-agent loop and the Nightshift
 // brief. Both call the Anthropic API for real and log a domain event when done.
 
-import { anthropic, costFor, hasApiKey } from "./anthropic.ts";
-import { logConverged, logNightshift, recentEvents } from "./db.ts";
+import { anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
+import { latestExchange, logBlindspots, logBranches, logConverged, logNightshift, logReplay, recentEvents } from "./db.ts";
 
 type Send = (event: string, data: unknown) => void;
 
@@ -118,4 +118,224 @@ export async function runNightshift(send: Send): Promise<void> {
 
   logNightshift("hub", `Nightshift filed a brief — ${findings.length} finding(s)`);
   send("brief", { findings, cost });
+}
+
+/** Pick a sensible alternate model to replay through — a different, current
+ *  model than the one that produced the original answer. */
+function alternateModel(originalId: string): string {
+  if (originalId !== "claude-opus-5") return "claude-opus-5";
+  return "claude-sonnet-5";
+}
+
+export async function runReplay(send: Send, requestedModel?: string): Promise<void> {
+  if (!hasApiKey()) {
+    send("error", { message: "No Anthropic API key configured — set ANTHROPIC_API_KEY to replay a past turn through another model." });
+    return;
+  }
+  const ex = latestExchange();
+  if (!ex) {
+    send("error", { message: "No completed chat turn to replay yet. Send a message in Chat first, then replay it here." });
+    return;
+  }
+  const origModelId = ex.original.model || "claude-opus-5";
+  const origMeta = modelById(origModelId);
+  const origCost = ex.original.cost || 0;
+
+  const replayModelId = modelById(requestedModel || alternateModel(origModelId)).id;
+  const replayMeta = modelById(replayModelId);
+
+  // Tell the client what the original was before we spend anything.
+  send("original", {
+    prompt: ex.prompt,
+    content: ex.original.content,
+    model: origModelId,
+    modelName: origMeta.name,
+    dot: origMeta.dot,
+    cost: origCost,
+    createdAt: ex.original.created_at,
+  });
+  send("replayStart", { model: replayModelId, modelName: replayMeta.name, dot: replayMeta.dot });
+
+  // Re-run the same prompt through the alternate model, streaming the answer.
+  let acc = "";
+  const stream = anthropic().messages.stream({
+    model: replayModelId,
+    max_tokens: 1200,
+    system:
+      "You are Claude, an agent operating inside Starkvisionz OS. Answer the user's request directly and concisely. " +
+      "Format replies in GitHub-flavored markdown. Do not include internal or system XML tags in your response.",
+    messages: [{ role: "user", content: ex.prompt }],
+  });
+  stream.on("text", (delta) => {
+    acc += delta;
+    send("token", { text: delta });
+  });
+  const final = await stream.finalMessage();
+  const inTok = final.usage?.input_tokens ?? 0;
+  const outTok = final.usage?.output_tokens ?? 0;
+  let cost = costFor(replayModelId, inTok, outTok);
+
+  // Ask a cheap model to diff the two answers into a few concrete bullets.
+  const diffPrompt =
+    `Prompt:\n${ex.prompt}\n\nORIGINAL answer (${origMeta.name}):\n${ex.original.content}\n\n` +
+    `REPLAYED answer (${replayMeta.name}):\n${acc}\n\n` +
+    `List 2-4 concrete, specific ways the replayed answer differs from the original. ` +
+    `Return ONLY JSON: an array of {"kind": "add"|"change"|"drop", "text": "<short phrase>"}.`;
+  const d = await claudeText(
+    "claude-haiku-4-5",
+    "You compare two answers and report only the material differences. Respond only with the requested JSON.",
+    diffPrompt,
+    400,
+  );
+  cost += costFor("claude-haiku-4-5", d.inTok, d.outTok);
+  const parsedDiffs = extractJson(d.text);
+  const diffs = Array.isArray(parsedDiffs)
+    ? parsedDiffs
+        .filter((x) => x && typeof x === "object")
+        .map((x) => {
+          const o = x as Record<string, unknown>;
+          const kind = String(o.kind || "change");
+          return { kind: ["add", "change", "drop"].includes(kind) ? kind : "change", text: String(o.text || "") };
+        })
+        .filter((x) => x.text)
+        .slice(0, 4)
+    : [];
+
+  logReplay("hub", `Replayed a turn through ${replayMeta.name} (was ${origMeta.name})`, cost);
+  send("done", {
+    model: replayModelId,
+    modelName: replayMeta.name,
+    dot: replayMeta.dot,
+    content: acc,
+    cost,
+    origCost,
+    diffs,
+  });
+}
+
+// ── agent branches: fork one decision into parallel, independent explorations ──
+const BRANCH_PERSONAS = [
+  {
+    key: "pragmatic",
+    label: "Pragmatic",
+    icon: "ph ph-hammer",
+    dot: "var(--color-accent)",
+    system: "You are a pragmatic staff engineer. Favor proven, boring technology and the fastest path to a shippable result. Optimize for time-to-ship and low operational surprise.",
+  },
+  {
+    key: "robust",
+    label: "Robust",
+    icon: "ph ph-shield-check",
+    dot: "#c9a27f",
+    system: "You are a reliability-minded architect. Favor correctness, scalability, and long-term maintainability even at some extra upfront effort. Optimize for durability under load and change.",
+  },
+  {
+    key: "lean",
+    label: "Lean",
+    icon: "ph ph-feather",
+    dot: "#7fbfa8",
+    system: "You are a minimalist engineer. Favor the smallest, cheapest solution that could possibly work. Optimize for low cost and low complexity, cutting anything non-essential.",
+  },
+];
+
+export async function runBranches(send: Send, task: string): Promise<void> {
+  if (!hasApiKey()) {
+    send("error", { message: "No Anthropic API key configured — set ANTHROPIC_API_KEY to fork real agent branches." });
+    return;
+  }
+  const model = "claude-opus-5";
+  let cost = 0;
+  const letters = ["A", "B", "C"];
+
+  const branches: {
+    id: string;
+    letter: string;
+    persona: string;
+    personaIcon: string;
+    personaDot: string;
+    title: string;
+    summary: string;
+    effort: string;
+    risk: string;
+    cost: number;
+  }[] = [];
+
+  for (let i = 0; i < BRANCH_PERSONAS.length; i++) {
+    const p = BRANCH_PERSONAS[i];
+    const prompt =
+      `Decision to make:\n${task}\n\n` +
+      `Propose ONE concrete approach that reflects your priorities. ` +
+      `Return ONLY JSON: {"title": "<=6 words naming the approach", "summary": "1-2 sentences on the approach and its main tradeoff", "effort": "S"|"M"|"L", "risk": "Low"|"Medium"|"High"}.`;
+    const r = await claudeText(model, p.system + " Respond only with the requested JSON.", prompt, 400);
+    cost += costFor(model, r.inTok, r.outTok);
+    const parsed = (extractJson(r.text) || {}) as Record<string, unknown>;
+    const effort = String(parsed.effort || "M").toUpperCase();
+    const risk = String(parsed.risk || "Medium");
+    branches.push({
+      id: p.key,
+      letter: letters[i] || String(i + 1),
+      persona: p.label,
+      personaIcon: p.icon,
+      personaDot: p.dot,
+      title: String(parsed.title || `${p.label} approach`).slice(0, 60),
+      summary: String(parsed.summary || r.text.slice(0, 160)).trim(),
+      effort: ["S", "M", "L"].includes(effort) ? effort : "M",
+      risk: ["Low", "Medium", "High"].includes(risk) ? risk : "Medium",
+      cost: costFor(model, r.inTok, r.outTok),
+    });
+  }
+
+  // A judge picks the single best branch for this decision.
+  let recommended = branches[0]?.id || "";
+  let rationale = "";
+  const judgePrompt =
+    `Decision:\n${task}\n\nCandidate approaches:\n` +
+    branches.map((b) => `- [${b.id}] ${b.title} (effort ${b.effort}, risk ${b.risk}): ${b.summary}`).join("\n") +
+    `\n\nPick the single best approach overall. Return ONLY JSON: {"best": "<one of the bracketed ids>", "reason": "<one short sentence>"}.`;
+  const j = await claudeText("claude-haiku-4-5", "You are a decisive technical judge. Respond only with the requested JSON.", judgePrompt, 200);
+  cost += costFor("claude-haiku-4-5", j.inTok, j.outTok);
+  const judged = extractJson(j.text) as { best?: string; reason?: string } | null;
+  if (judged?.best && branches.some((b) => b.id === judged.best)) recommended = judged.best;
+  rationale = (judged?.reason || "").trim();
+
+  logBranches("hub", `Forked ${branches.length} agent branches for a decision`, cost);
+  send("branches", { branches: branches.map((b) => ({ ...b, recommended: b.id === recommended })), recommended, rationale, cost });
+}
+
+// ── blind spot map: have Claude surface gaps + unverified assumptions from the log ──
+export async function runBlindspots(send: Send): Promise<void> {
+  if (!hasApiKey()) {
+    send("error", { message: "No Anthropic API key configured — set ANTHROPIC_API_KEY to scan the event log for blind spots." });
+    return;
+  }
+  const events = recentEvents(40);
+  const log = events.length ? events.map((e) => `- ${e.type}: ${e.summary}`).join("\n") : "(no activity recorded yet)";
+  const prompt =
+    `You are auditing an AI workspace for blind spots — questions the system is quietly assuming an answer to, and gaps it keeps filling with guesses. Here is the recent activity log:\n\n${log}\n\n` +
+    `Surface 3-5 blind spots. For each, name the open question, the area it touches, what is currently being assumed, what depends on it, and a severity 0-100. ` +
+    `If the log is sparse, infer plausible blind spots for an event-sourced AI workspace and say so in the "assumed" text. ` +
+    `Return ONLY JSON: an array of {"q": "<question>", "area": "<one short word: infra|policy|cost|data|scope|security>", "assumed": "<1-2 sentences>", "rides": "<what depends on it>", "sev": <integer 0-100>}.`;
+  const r = await claudeText(AUTHOR_MODEL, "You are a rigorous auditor who names hidden assumptions precisely. Respond only with the requested JSON.", prompt, 900);
+  const cost = costFor(AUTHOR_MODEL, r.inTok, r.outTok);
+  const parsed = extractJson(r.text);
+  const spots = Array.isArray(parsed)
+    ? parsed
+        .filter((x) => x && typeof x === "object")
+        .map((x, i) => {
+          const o = x as Record<string, unknown>;
+          const sev = Math.max(0, Math.min(100, Math.round(Number(o.sev ?? 50))));
+          return {
+            id: "bs" + (i + 1),
+            q: String(o.q || "Unnamed blind spot"),
+            area: String(o.area || "scope").toLowerCase().slice(0, 12),
+            assumed: String(o.assumed || ""),
+            rides: String(o.rides || "unknown"),
+            sev,
+          };
+        })
+        .slice(0, 5)
+    : [];
+
+  logBlindspots("hub", `Scanned the event log — ${spots.length} blind spot(s) surfaced`, cost);
+  send("spots", { spots, cost });
 }
