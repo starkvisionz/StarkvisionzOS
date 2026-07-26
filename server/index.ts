@@ -12,6 +12,7 @@ import {
   historyForModel,
   listMessages,
   listSessions,
+  modelLeaderboard,
   putSettingsCmd,
   rebuildProjections,
   recentEvents,
@@ -103,6 +104,14 @@ app.get("/api/events", (req, res) => {
 app.get("/api/projections/dashboard", (_req, res) => {
   const d = dashboardFromEvents();
   res.json({ ...d, apiKey: hasApiKey() });
+});
+
+app.get("/api/projections/models", (_req, res) => {
+  const rows = modelLeaderboard().map((r) => {
+    const m = modelById(r.model);
+    return { model: r.model, name: m.name, sub: m.sub, dot: m.dot, messages: r.messages, spend: r.spend, tokens: r.tokens };
+  });
+  res.json({ models: rows });
 });
 
 // ── chat (SSE streaming) ──

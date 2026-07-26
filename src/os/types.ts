@@ -207,6 +207,16 @@ export interface CfMetric {
   good: boolean;
 }
 
+export interface ModelUsage {
+  model: string;
+  name: string;
+  sub: string;
+  dot: string;
+  messages: number;
+  spend: number;
+  tokens: number;
+}
+
 export interface State {
   view: ViewId;
   pickerOpen: boolean;
@@ -299,4 +309,5 @@ export interface State {
   cfError: string;
   cfMetricsReal: CfMetric[];
   cfVerdictReal: string;
+  marketReal: ModelUsage[];
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BlindSpot, Block, BranchResult, CfMetric, ChatModel, LoopRoundSeed, Message, NightFinding, ReplayDiff, State, TimelineEvent } from "./types";
+import type { BlindSpot, Block, BranchResult, CfMetric, ChatModel, LoopRoundSeed, Message, ModelUsage, NightFinding, ReplayDiff, State, TimelineEvent } from "./types";
 import {
   INITIAL_ABOUT,
   INITIAL_LOOP_TASK,
@@ -103,6 +103,7 @@ function initialState(): State {
     cfError: "",
     cfMetricsReal: [],
     cfVerdictReal: "",
+    marketReal: [],
   };
 }
 
@@ -308,8 +309,8 @@ export function useController(): Controller {
 
   const refreshFeeds = useCallback(async () => {
     try {
-      const [ev, dash] = await Promise.all([api.events(40), api.dashboard()]);
-      setState({ events: ev.events.map(mapEvent), dash });
+      const [ev, dash, mkt] = await Promise.all([api.events(40), api.dashboard(), api.modelLeaderboard()]);
+      setState({ events: ev.events.map(mapEvent), dash, marketReal: mkt.models as ModelUsage[] });
     } catch {
       /* backend may be momentarily unavailable */
     }

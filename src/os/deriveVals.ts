@@ -19,7 +19,6 @@ import {
   GQ,
   GTYPES,
   LIBRARY_ARTIFACTS,
-  MARKET,
   NEG_TURNS,
   PLUGINS,
   RECOVERY_STEPS,
@@ -782,27 +781,29 @@ export function deriveVals(s: State, a: Actions) {
         };
       });
 
-  // ── agent market ──
-  const marketCats = ["Coding", "Research", "Deploy", "Summarize"].map((c) => ({
-    label: c,
-    onSelect: () => a.setMarketCat(c),
-    bg: c === s.marketCat ? "color-mix(in srgb,var(--color-accent) 22%,transparent)" : "transparent",
-    color: c === s.marketCat ? "var(--color-accent-300)" : "var(--color-neutral-400)",
-    border: c === s.marketCat ? "var(--color-accent-500)" : "var(--color-divider)",
-  }));
-  const marketRows = (MARKET[s.marketCat] || []).map((r, i) => {
-    const m = agentMeta(r[4]);
+  // ── agent market (real: per-model usage leaderboard from the event log) ──
+  const marketHasReal = s.marketReal.length > 0;
+  const fmtUsd = (n: number) => "$" + (n >= 0.01 || n === 0 ? n.toFixed(2) : n.toFixed(4));
+  const marketRows = s.marketReal.map((r, i) => {
+    const avg = r.messages ? r.spend / r.messages : 0;
+    const isActive = r.model === s.modelId;
     return {
       rank: i + 1,
       rankIcon: i === 0 ? "ph-fill ph-crown" : "ph ph-circle",
       rankColor: i === 0 ? "var(--color-accent)" : "var(--color-neutral-600)",
-      name: r[0],
-      dot: m.dot,
-      success: r[1],
-      cost: r[2],
-      latency: r[3],
-      btnClass: i === 0 ? "btn-primary" : "btn-secondary",
-      btnLabel: i === 0 ? "Route here" : "Route",
+      name: r.name,
+      sub: r.sub,
+      dot: r.dot,
+      messages: String(r.messages),
+      spend: fmtUsd(r.spend),
+      avg: r.spend > 0 ? fmtUsd(avg) : "—",
+      tokens: r.tokens >= 1000 ? (r.tokens / 1000).toFixed(1) + "k" : String(r.tokens),
+      btnClass: isActive ? "btn-secondary" : i === 0 ? "btn-primary" : "btn-secondary",
+      btnLabel: isActive ? "Active" : "Route here",
+      onRoute: () => {
+        a.selectModel(r.model);
+        a.switchView("chat");
+      },
     };
   });
 
@@ -1068,8 +1069,9 @@ export function deriveVals(s: State, a: Actions) {
     replayBtnLabel: s.replayRunning ? "Replaying…" : s.replayDone ? "Replay again" : "Replay last turn",
     replayBtnIcon: s.replayRunning ? "ph ph-circle-notch" : s.replayDone ? "ph ph-arrow-counter-clockwise" : "ph ph-clock-clockwise",
     replaySpin: s.replayRunning ? "animation:ocspin 1s linear infinite" : "",
-    marketCats,
     marketRows,
+    marketHasReal,
+    marketEmpty: !marketHasReal,
     recSteps,
     runRecovery: () => a.runRecovery(),
     recDone: s.recDone,
