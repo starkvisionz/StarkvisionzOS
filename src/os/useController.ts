@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BlindSpot, Block, BranchResult, CfMetric, ChatModel, LoopRoundSeed, Message, ModelUsage, NightFinding, ReplayDiff, State, TimelineEvent } from "./types";
+import type { BlindSpot, Block, BranchResult, CfMetric, ChatModel, Claim, LoopRoundSeed, Message, ModelUsage, NightFinding, ReplayDiff, State, TimelineEvent } from "./types";
 import {
   INITIAL_ABOUT,
   INITIAL_LOOP_TASK,
@@ -8,7 +8,7 @@ import {
   PROJECTS,
   loopSeed,
 } from "./data";
-import { CLAIMS, NEG_TURNS } from "./labdata";
+import { NEG_TURNS } from "./labdata";
 import { ApiError, api, streamChat, streamSSE, type ApiEvent, type ApiMessage, type ApiSession } from "../api";
 
 function initialState(): State {
@@ -104,6 +104,9 @@ function initialState(): State {
     cfMetricsReal: [],
     cfVerdictReal: "",
     marketReal: [],
+    truthReal: [],
+    truthRunning: false,
+    truthError: "",
   };
 }
 
@@ -242,6 +245,7 @@ export interface Actions {
   closeSpot(id: string): void;
   runBlind(): void;
   runNight(): void;
+  runTruth(): void;
   reverify(id: string): void;
   reverifyAll(): void;
   setInputRef(el: HTMLTextAreaElement | null): void;
@@ -893,22 +897,47 @@ export function useController(): Controller {
         }
       });
     },
-    reverify(id) {
-      if (stateRef.current.checking[id]) return;
-      setState((s) => ({ checking: { ...s.checking, [id]: true } }));
-      setTimeout(
-        () =>
-          setState((s) => ({
-            checking: { ...s.checking, [id]: false },
-            claimConf: { ...s.claimConf, [id]: 97 },
-            claimAge: { ...s.claimAge, [id]: "just now" },
-          })),
-        1100,
-      );
+    runTruth() {
+      const s = stateRef.current;
+      if (s.truthRunning) return;
+      setState({ truthRunning: true, truthError: "", truthReal: [], claimConf: {}, claimAge: {}, checking: {} });
+      streamSSE("/api/truth/scan", {}, (event, data) => {
+        if (event === "claims") {
+          const raw = Array.isArray(data.claims) ? (data.claims as Record<string, unknown>[]) : [];
+          const claims: Claim[] = raw.map((c, i) => ({
+            id: String(c.id ?? "cl" + (i + 1)),
+            text: String(c.text ?? "Claim"),
+            source: String(c.source ?? "unknown source"),
+            conf: Number(c.conf) || 0,
+            half: String(c.half ?? "30d"),
+          }));
+          setState({ truthRunning: false, truthReal: claims });
+          refreshFeeds();
+        } else if (event === "error") {
+          setState({ truthRunning: false, truthError: String(data.message || "Claim scan failed.") });
+        }
+      });
+    },
+    async reverify(id) {
+      const s = stateRef.current;
+      if (s.checking[id]) return;
+      const claim = s.truthReal.find((c) => c.id === id);
+      if (!claim) return;
+      setState((st) => ({ checking: { ...st.checking, [id]: true } }));
+      try {
+        const r = await api.reverifyClaim(claim.text);
+        setState((st) => ({
+          checking: { ...st.checking, [id]: false },
+          claimConf: { ...st.claimConf, [id]: r.conf },
+          claimAge: { ...st.claimAge, [id]: "just now" },
+        }));
+      } catch {
+        setState((st) => ({ checking: { ...st.checking, [id]: false } }));
+      }
     },
     reverifyAll() {
       const s = stateRef.current;
-      CLAIMS.filter((c) => (s.claimConf[c.id] ?? c.conf) < 60).forEach((c, i) => setTimeout(() => actions.reverify(c.id), i * 260));
+      s.truthReal.filter((c) => (s.claimConf[c.id] ?? c.conf) < 60).forEach((c, i) => setTimeout(() => actions.reverify(c.id), i * 300));
     },
     setInputRef(el) {
       inputRef.current = el;

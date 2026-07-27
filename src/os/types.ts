@@ -217,6 +217,14 @@ export interface ModelUsage {
   tokens: number;
 }
 
+export interface Claim {
+  id: string;
+  text: string;
+  source: string;
+  conf: number;
+  half: string;
+}
+
 export interface State {
   view: ViewId;
   pickerOpen: boolean;
@@ -310,4 +318,7 @@ export interface State {
   cfMetricsReal: CfMetric[];
   cfVerdictReal: string;
   marketReal: ModelUsage[];
+  truthReal: Claim[];
+  truthRunning: boolean;
+  truthError: string;
 }

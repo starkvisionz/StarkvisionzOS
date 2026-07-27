@@ -19,7 +19,7 @@ import {
   renameSessionCmd,
 } from "./db.ts";
 import { DEFAULT_MODEL, MODELS, anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
-import { runBlindspots, runBranches, runCounterfactual, runLoop, runNightshift, runReplay } from "./agents.ts";
+import { reverifyClaim, runBlindspots, runBranches, runCounterfactual, runLoop, runNightshift, runReplay, runTruthScan } from "./agents.ts";
 import {
   ACTOR,
   AUTH_REQUIRED,
@@ -349,6 +349,33 @@ app.post("/api/counterfactual/run", rateLimit("agents", CHAT_LIMIT), async (req:
     send("error", { message: err instanceof Error ? err.message : "Counterfactual failed." });
   }
   res.end();
+});
+
+app.post("/api/truth/scan", rateLimit("agents", CHAT_LIMIT), async (_req: Request, res: Response) => {
+  sseHeaders(res);
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+  try {
+    await runTruthScan(send);
+  } catch (err) {
+    send("error", { message: err instanceof Error ? err.message : "Claim scan failed." });
+  }
+  res.end();
+});
+
+app.post("/api/truth/reverify", rateLimit("agents", CHAT_LIMIT), async (req: Request, res: Response) => {
+  const text = (req.body?.text ?? "").toString().trim();
+  if (!text) return res.status(400).json({ error: "Provide the claim text to re-verify." });
+  if (text.length > MAX_PROMPT_CHARS) return res.status(400).json({ error: "Claim too long." });
+  if (!hasApiKey()) return res.status(503).json({ error: "No Anthropic API key configured." });
+  try {
+    const result = await reverifyClaim(text);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Re-verify failed." });
+  }
 });
 
 // ── serve the built frontend in production, if present ──

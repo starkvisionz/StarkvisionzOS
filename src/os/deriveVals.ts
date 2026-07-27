@@ -9,7 +9,6 @@ import {
   BRANCHES,
   CF_METRICS,
   CF_VERDICT,
-  CLAIMS,
   DASH_AGENTS,
   DASH_STATS,
   DASH_TASKS,
@@ -432,7 +431,7 @@ export function deriveVals(s: State, a: Actions) {
 
   // ── attention panel ──
   const attention = [
-    { label: "Stale claims below threshold", sub: "confidence has decayed past 60%", n: CLAIMS.filter((c) => (s.claimConf[c.id] ?? c.conf) < 60).length, icon: "ph-fill ph-warning-circle", color: "#d68f9a", v: "truth" as const },
+    { label: "Stale claims below threshold", sub: "confidence has decayed past 60%", n: s.truthReal.filter((c) => (s.claimConf[c.id] ?? c.conf) < 60).length, icon: "ph-fill ph-warning-circle", color: "#d68f9a", v: "truth" as const },
     { label: "Open blind spots", sub: "gaps agents keep filling with guesses", n: (s.blindReal.length ? s.blindReal : BLIND_SPOTS).filter((b) => !s.closedSpots[b.id]).length, icon: "ph ph-question", color: "#d6c07a", v: "blind" as const },
     { label: "Nightshift items awaiting approval", sub: "drafted, not executed", n: s.nightReal.filter((f) => f.kind === "drafted").length, icon: "ph ph-moon-stars", color: "var(--color-accent)", v: "night" as const },
     { label: "Decisions with high regret", sub: "confident calls that did not hold", n: REGRET_ROWS.filter((r) => r.good === false).length, icon: "ph ph-scales", color: "#d68f9a", v: "regret" as const },
@@ -526,17 +525,18 @@ export function deriveVals(s: State, a: Actions) {
   });
   const blindClosedN = blindSource.filter((b) => s.closedSpots[b.id]).length;
 
-  // ── truth decay ──
-  const claims = CLAIMS.map((c) => {
+  // ── truth decay (real: Claude extracts + re-scores the workspace's claims) ──
+  const hasRealTruth = s.truthReal.length > 0;
+  const claims = s.truthReal.map((c) => {
     const conf = s.claimConf[c.id] ?? c.conf;
     const chk = !!s.checking[c.id];
     const color = conf >= 80 ? "var(--color-accent)" : conf >= 55 ? "#d6c07a" : "#d68f9a";
     return {
       text: c.text,
       source: c.source,
-      srcIcon: c.srcIcon,
+      srcIcon: "ph ph-file-text",
       half: c.half,
-      age: s.claimAge[c.id] ?? c.age,
+      age: s.claimAge[c.id] ?? "from the log",
       conf: conf + "%",
       color,
       border: conf < 55 ? "color-mix(in srgb,#d68f9a 34%,transparent)" : "var(--color-divider)",
@@ -548,8 +548,8 @@ export function deriveVals(s: State, a: Actions) {
       onReverify: () => a.reverify(c.id),
     };
   });
-  const confs = CLAIMS.map((c) => s.claimConf[c.id] ?? c.conf);
-  const truthAvg = Math.round(confs.reduce((x, y) => x + y, 0) / confs.length) + "%";
+  const confs = s.truthReal.map((c) => s.claimConf[c.id] ?? c.conf);
+  const truthAvg = (confs.length ? Math.round(confs.reduce((x, y) => x + y, 0) / confs.length) : 0) + "%";
   const truthStale = confs.filter((x) => x < 60).length;
 
   // ── nightshift (real Claude-generated brief from the event log) ──
@@ -622,6 +622,7 @@ export function deriveVals(s: State, a: Actions) {
     { label: "Scan for blind spots", icon: "ph ph-radar", kind: "action", run: () => { a.switchView("blind"); a.runBlind(); } },
     { label: "Settle a deadlock by negotiation", icon: "ph ph-handshake", kind: "action", run: () => { a.switchView("negotiate"); a.runNeg(); } },
     { label: "Raise stakes to production", icon: "ph ph-gauge", kind: "action", run: () => { a.switchView("dash"); a.setStake("money"); } },
+    { label: "Scan for load-bearing claims", icon: "ph ph-hourglass-medium", kind: "action", run: () => { a.switchView("truth"); a.runTruth(); } },
     { label: "Re-verify stale claims", icon: "ph ph-hourglass-medium", kind: "action", run: () => { a.switchView("truth"); a.reverifyAll(); } },
     { label: "Run multi-agent loop", icon: "ph ph-arrows-clockwise", kind: "action", run: () => { a.switchView("loop"); a.runLoop(); } },
     { label: "Run autonomous recovery", icon: "ph ph-heartbeat", kind: "action", run: () => { a.switchView("recovery"); a.runRecovery(); } },
@@ -939,6 +940,13 @@ export function deriveVals(s: State, a: Actions) {
     claims,
     truthAvg,
     truthStale,
+    truthHasReal: hasRealTruth,
+    truthError: s.truthError,
+    truthEmpty: !hasRealTruth && !s.truthError,
+    runTruth: () => a.runTruth(),
+    truthBtnLabel: s.truthRunning ? "Scanning…" : hasRealTruth ? "Scan again" : "Scan the log",
+    truthBtnIcon: s.truthRunning ? "ph ph-circle-notch" : "ph ph-magnifying-glass",
+    truthSpin: s.truthRunning ? "animation:ocspin 1s linear infinite" : "",
     reverifyAll: () => a.reverifyAll(),
     runNight: () => a.runNight(),
     nightFindings,
