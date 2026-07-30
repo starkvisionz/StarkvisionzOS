@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BlindSpot, Block, BranchResult, ChatModel, LoopRoundSeed, Message, NightFinding, ReplayDiff, State, TimelineEvent } from "./types";
+import type { BlindSpot, Block, BranchResult, CfMetric, ChatModel, Claim, LoopRoundSeed, Message, ModelUsage, NightFinding, ReplayDiff, State, TimelineEvent } from "./types";
 import {
   INITIAL_ABOUT,
   INITIAL_LOOP_TASK,
@@ -8,7 +8,7 @@ import {
   PROJECTS,
   loopSeed,
 } from "./data";
-import { CLAIMS, NEG_TURNS } from "./labdata";
+import { NEG_TURNS } from "./labdata";
 import { ApiError, api, streamChat, streamSSE, type ApiEvent, type ApiMessage, type ApiSession } from "../api";
 
 function initialState(): State {
@@ -98,6 +98,15 @@ function initialState(): State {
     blindRunning: false,
     blindError: "",
     blindReal: [],
+    cfDecision: "Next.js + PostgreSQL (a single app framework over one relational store)",
+    cfAlternative: "React + FastAPI (a separate SPA and Python API)",
+    cfError: "",
+    cfMetricsReal: [],
+    cfVerdictReal: "",
+    marketReal: [],
+    truthReal: [],
+    truthRunning: false,
+    truthError: "",
   };
 }
 
@@ -206,6 +215,8 @@ export interface Actions {
   setMarketCat(c: string): void;
   runRecovery(): void;
   runCounter(): void;
+  setCfDecision(v: string): void;
+  setCfAlternative(v: string): void;
   runLoop(): void;
   resetLoop(): void;
   improveMore(): void;
@@ -234,6 +245,7 @@ export interface Actions {
   closeSpot(id: string): void;
   runBlind(): void;
   runNight(): void;
+  runTruth(): void;
   reverify(id: string): void;
   reverifyAll(): void;
   setInputRef(el: HTMLTextAreaElement | null): void;
@@ -301,8 +313,8 @@ export function useController(): Controller {
 
   const refreshFeeds = useCallback(async () => {
     try {
-      const [ev, dash] = await Promise.all([api.events(40), api.dashboard()]);
-      setState({ events: ev.events.map(mapEvent), dash });
+      const [ev, dash, mkt] = await Promise.all([api.events(40), api.dashboard(), api.modelLeaderboard()]);
+      setState({ events: ev.events.map(mapEvent), dash, marketReal: mkt.models as ModelUsage[] });
     } catch {
       /* backend may be momentarily unavailable */
     }
@@ -628,14 +640,37 @@ export function useController(): Controller {
         });
       }, 750);
     },
+    setCfDecision(v) {
+      setState({ cfDecision: v });
+    },
+    setCfAlternative(v) {
+      setState({ cfAlternative: v });
+    },
     runCounter() {
       const s = stateRef.current;
-      if (s.cfRunning || s.cfDone) {
-        setState({ cfDone: false });
-        return;
-      }
-      setState({ cfRunning: true, cfDone: false });
-      setTimeout(() => setState({ cfRunning: false, cfDone: true }), 1400);
+      if (s.cfRunning) return;
+      const decision = (s.cfDecision || "").trim();
+      const alternative = (s.cfAlternative || "").trim();
+      if (!decision || !alternative) return;
+      setState({ cfRunning: true, cfDone: false, cfError: "", cfMetricsReal: [], cfVerdictReal: "" });
+      streamSSE("/api/counterfactual/run", { decision, alternative }, (event, data) => {
+        if (event === "done") {
+          const raw = Array.isArray(data.metrics) ? (data.metrics as Record<string, unknown>[]) : [];
+          const metrics: CfMetric[] = raw.map((m) => ({
+            k: String(m.k ?? "Metric"),
+            base: String(m.base ?? "—"),
+            alt: String(m.alt ?? "—"),
+            baseW: Number(m.baseW) || 0,
+            altW: Number(m.altW) || 0,
+            delta: String(m.delta ?? ""),
+            good: !!m.good,
+          }));
+          setState({ cfRunning: false, cfDone: true, cfMetricsReal: metrics, cfVerdictReal: String(data.verdict ?? "") });
+          refreshFeeds();
+        } else if (event === "error") {
+          setState({ cfRunning: false, cfError: String(data.message || "Counterfactual failed.") });
+        }
+      });
     },
     runLoop() {
       const s = stateRef.current;
@@ -862,22 +897,47 @@ export function useController(): Controller {
         }
       });
     },
-    reverify(id) {
-      if (stateRef.current.checking[id]) return;
-      setState((s) => ({ checking: { ...s.checking, [id]: true } }));
-      setTimeout(
-        () =>
-          setState((s) => ({
-            checking: { ...s.checking, [id]: false },
-            claimConf: { ...s.claimConf, [id]: 97 },
-            claimAge: { ...s.claimAge, [id]: "just now" },
-          })),
-        1100,
-      );
+    runTruth() {
+      const s = stateRef.current;
+      if (s.truthRunning) return;
+      setState({ truthRunning: true, truthError: "", truthReal: [], claimConf: {}, claimAge: {}, checking: {} });
+      streamSSE("/api/truth/scan", {}, (event, data) => {
+        if (event === "claims") {
+          const raw = Array.isArray(data.claims) ? (data.claims as Record<string, unknown>[]) : [];
+          const claims: Claim[] = raw.map((c, i) => ({
+            id: String(c.id ?? "cl" + (i + 1)),
+            text: String(c.text ?? "Claim"),
+            source: String(c.source ?? "unknown source"),
+            conf: Number(c.conf) || 0,
+            half: String(c.half ?? "30d"),
+          }));
+          setState({ truthRunning: false, truthReal: claims });
+          refreshFeeds();
+        } else if (event === "error") {
+          setState({ truthRunning: false, truthError: String(data.message || "Claim scan failed.") });
+        }
+      });
+    },
+    async reverify(id) {
+      const s = stateRef.current;
+      if (s.checking[id]) return;
+      const claim = s.truthReal.find((c) => c.id === id);
+      if (!claim) return;
+      setState((st) => ({ checking: { ...st.checking, [id]: true } }));
+      try {
+        const r = await api.reverifyClaim(claim.text);
+        setState((st) => ({
+          checking: { ...st.checking, [id]: false },
+          claimConf: { ...st.claimConf, [id]: r.conf },
+          claimAge: { ...st.claimAge, [id]: "just now" },
+        }));
+      } catch {
+        setState((st) => ({ checking: { ...st.checking, [id]: false } }));
+      }
     },
     reverifyAll() {
       const s = stateRef.current;
-      CLAIMS.filter((c) => (s.claimConf[c.id] ?? c.conf) < 60).forEach((c, i) => setTimeout(() => actions.reverify(c.id), i * 260));
+      s.truthReal.filter((c) => (s.claimConf[c.id] ?? c.conf) < 60).forEach((c, i) => setTimeout(() => actions.reverify(c.id), i * 300));
     },
     setInputRef(el) {
       inputRef.current = el;

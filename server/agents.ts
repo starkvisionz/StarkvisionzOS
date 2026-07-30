@@ -2,7 +2,7 @@
 // brief. Both call the Anthropic API for real and log a domain event when done.
 
 import { anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
-import { latestExchange, logBlindspots, logBranches, logConverged, logNightshift, logReplay, recentEvents } from "./db.ts";
+import { latestExchange, logBlindspots, logBranches, logConverged, logCounterfactual, logNightshift, logReplay, logTruth, recentEvents } from "./db.ts";
 
 type Send = (event: string, data: unknown) => void;
 
@@ -338,4 +338,95 @@ export async function runBlindspots(send: Send): Promise<void> {
 
   logBlindspots("hub", `Scanned the event log — ${spots.length} blind spot(s) surfaced`, cost);
   send("spots", { spots, cost });
+}
+
+// ── counterfactual: project the alternate outcome of a decision ──
+export async function runCounterfactual(send: Send, decision: string, alternative: string): Promise<void> {
+  if (!hasApiKey()) {
+    send("error", { message: "No Anthropic API key configured — set ANTHROPIC_API_KEY to run a real counterfactual." });
+    return;
+  }
+  const prompt =
+    `A team CHOSE this option:\n${decision}\n\nThe road not taken (the ALTERNATIVE) was:\n${alternative}\n\n` +
+    `Project the alternate outcome as change-impact analysis. Pick 3-4 metrics that matter for this kind of decision. ` +
+    `For each metric give the chosen option's value and the alternative's value, a relative bar magnitude 0-100 for each (higher = more of that metric), a short signed delta label, and whether the CHOSEN option is better on that metric. ` +
+    `Then give a one-paragraph verdict on whether the chosen option was the right call.\n\n` +
+    `Return ONLY JSON: {"metrics":[{"k":"<metric>","base":"<chosen value>","alt":"<alternative value>","baseW":<0-100>,"altW":<0-100>,"delta":"<short signed label>","good":<true if chosen is better>}],"verdict":"<one paragraph>"}.`;
+  const r = await claudeText(
+    AUTHOR_MODEL,
+    "You are a decision analyst who projects concrete, quantified outcomes. Be realistic and specific. Respond only with the requested JSON.",
+    prompt,
+    1000,
+  );
+  const cost = costFor(AUTHOR_MODEL, r.inTok, r.outTok);
+  const parsed = (extractJson(r.text) || {}) as Record<string, unknown>;
+  const rawMetrics = Array.isArray(parsed.metrics) ? (parsed.metrics as Record<string, unknown>[]) : [];
+  const clampW = (n: unknown) => Math.max(2, Math.min(100, Math.round(Number(n) || 0)));
+  const metrics = rawMetrics
+    .filter((m) => m && typeof m === "object")
+    .map((m) => ({
+      k: String(m.k || "Metric"),
+      base: String(m.base ?? "—"),
+      alt: String(m.alt ?? "—"),
+      baseW: clampW(m.baseW),
+      altW: clampW(m.altW),
+      delta: String(m.delta ?? ""),
+      good: !!m.good,
+    }))
+    .slice(0, 5);
+  const verdict = String(parsed.verdict || r.text.slice(0, 240)).trim();
+
+  logCounterfactual("hub", `Projected a counterfactual across ${metrics.length} metric(s)`, cost);
+  send("done", { metrics, verdict, cost });
+}
+
+// ── truth decay: extract the claims the workspace relies on + re-verify them ──
+export async function runTruthScan(send: Send): Promise<void> {
+  if (!hasApiKey()) {
+    send("error", { message: "No Anthropic API key configured — set ANTHROPIC_API_KEY to extract and score claims." });
+    return;
+  }
+  const events = recentEvents(40);
+  const log = events.length ? events.map((e) => `- ${e.type}: ${e.summary}`).join("\n") : "(no activity recorded yet)";
+  const prompt =
+    `An AI workspace relies on factual claims that quietly age. From the recent activity log, surface 3-5 concrete claims the system is currently treating as true.\n\n${log}\n\n` +
+    `For each claim give the statement, a plausible source, a current confidence 0-100, and a confidence half-life (how fast it should decay, e.g. "14d", "30d", "90d"). ` +
+    `If the log is sparse, infer plausible claims for an event-sourced AI workspace and say so implicitly in the source. ` +
+    `Return ONLY JSON: an array of {"text":"<claim>","source":"<where it came from>","conf":<0-100>,"half":"<Nd>"}.`;
+  const r = await claudeText(AUTHOR_MODEL, "You surface load-bearing factual assumptions precisely. Respond only with the requested JSON.", prompt, 900);
+  const cost = costFor(AUTHOR_MODEL, r.inTok, r.outTok);
+  const parsed = extractJson(r.text);
+  const claims = Array.isArray(parsed)
+    ? parsed
+        .filter((x) => x && typeof x === "object")
+        .map((x, i) => {
+          const o = x as Record<string, unknown>;
+          return {
+            id: "cl" + (i + 1),
+            text: String(o.text || "Unnamed claim"),
+            source: String(o.source || "unknown source"),
+            conf: Math.max(0, Math.min(100, Math.round(Number(o.conf ?? 60)))),
+            half: String(o.half || "30d"),
+          };
+        })
+        .slice(0, 5)
+    : [];
+
+  logTruth("hub", `Extracted ${claims.length} load-bearing claim(s) from the log`, cost);
+  send("claims", { claims, cost });
+}
+
+/** Re-assess one claim's confidence. Returns 0-100 + a one-line note + cost. */
+export async function reverifyClaim(text: string): Promise<{ conf: number; note: string; cost: number }> {
+  const events = recentEvents(40);
+  const log = events.length ? events.map((e) => `- ${e.type}: ${e.summary}`).join("\n") : "(no activity recorded yet)";
+  const prompt =
+    `Re-assess how confident we should be, right now, in this claim about an AI workspace:\n\n"${text}"\n\n` +
+    `Recent activity log for context:\n${log}\n\n` +
+    `Return ONLY JSON: {"conf": <integer 0-100>, "note": "<one short sentence>"}.`;
+  const r = await claudeText("claude-haiku-4-5", "You are a careful fact-checker. Respond only with the requested JSON.", prompt, 200);
+  const cost = costFor("claude-haiku-4-5", r.inTok, r.outTok);
+  const parsed = (extractJson(r.text) || {}) as Record<string, unknown>;
+  const conf = Math.max(0, Math.min(100, Math.round(Number(parsed.conf ?? 60))));
+  return { conf, note: String(parsed.note || "").trim(), cost };
 }

@@ -115,6 +115,12 @@ export const api = {
   messages: (id: string) => jsonFetch<{ session: ApiSession; messages: ApiMessage[] }>(`/api/sessions/${id}/messages`),
   events: (limit = 40) => jsonFetch<{ events: ApiEvent[] }>(`/api/events?limit=${limit}`),
   dashboard: () => jsonFetch<DashProjection>("/api/projections/dashboard"),
+  modelLeaderboard: () =>
+    jsonFetch<{ models: { model: string; name: string; sub: string; dot: string; messages: number; spend: number; tokens: number }[] }>(
+      "/api/projections/models",
+    ),
+  reverifyClaim: (text: string) =>
+    jsonFetch<{ conf: number; note: string; cost: number }>("/api/truth/reverify", { method: "POST", body: JSON.stringify({ text }) }),
   getSettings: () => jsonFetch<{ settings: AppSettingsDTO }>("/api/settings"),
   putSettings: (partial: Partial<AppSettingsDTO>) =>
     jsonFetch<{ settings: AppSettingsDTO }>("/api/settings", { method: "PUT", body: JSON.stringify(partial) }),

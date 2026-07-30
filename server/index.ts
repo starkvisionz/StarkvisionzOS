@@ -12,13 +12,14 @@ import {
   historyForModel,
   listMessages,
   listSessions,
+  modelLeaderboard,
   putSettingsCmd,
   rebuildProjections,
   recentEvents,
   renameSessionCmd,
 } from "./db.ts";
 import { DEFAULT_MODEL, MODELS, anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
-import { runBlindspots, runBranches, runLoop, runNightshift, runReplay } from "./agents.ts";
+import { reverifyClaim, runBlindspots, runBranches, runCounterfactual, runLoop, runNightshift, runReplay, runTruthScan } from "./agents.ts";
 import {
   ACTOR,
   AUTH_REQUIRED,
@@ -103,6 +104,14 @@ app.get("/api/events", (req, res) => {
 app.get("/api/projections/dashboard", (_req, res) => {
   const d = dashboardFromEvents();
   res.json({ ...d, apiKey: hasApiKey() });
+});
+
+app.get("/api/projections/models", (_req, res) => {
+  const rows = modelLeaderboard().map((r) => {
+    const m = modelById(r.model);
+    return { model: r.model, name: m.name, sub: m.sub, dot: m.dot, messages: r.messages, spend: r.spend, tokens: r.tokens };
+  });
+  res.json({ models: rows });
 });
 
 // ── chat (SSE streaming) ──
@@ -316,6 +325,57 @@ app.post("/api/blindspots/run", rateLimit("agents", CHAT_LIMIT), async (_req: Re
     send("error", { message: err instanceof Error ? err.message : "Blind-spot scan failed." });
   }
   res.end();
+});
+
+app.post("/api/counterfactual/run", rateLimit("agents", CHAT_LIMIT), async (req: Request, res: Response) => {
+  const decision = (req.body?.decision ?? "").toString().trim();
+  const alternative = (req.body?.alternative ?? "").toString().trim();
+  sseHeaders(res);
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+  if (!decision || !alternative) {
+    send("error", { message: "Provide both the chosen decision and the alternative to compare." });
+    return res.end();
+  }
+  if (decision.length + alternative.length > MAX_PROMPT_CHARS) {
+    send("error", { message: `Inputs too long (max ${MAX_PROMPT_CHARS} characters combined).` });
+    return res.end();
+  }
+  try {
+    await runCounterfactual(send, decision, alternative);
+  } catch (err) {
+    send("error", { message: err instanceof Error ? err.message : "Counterfactual failed." });
+  }
+  res.end();
+});
+
+app.post("/api/truth/scan", rateLimit("agents", CHAT_LIMIT), async (_req: Request, res: Response) => {
+  sseHeaders(res);
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+  try {
+    await runTruthScan(send);
+  } catch (err) {
+    send("error", { message: err instanceof Error ? err.message : "Claim scan failed." });
+  }
+  res.end();
+});
+
+app.post("/api/truth/reverify", rateLimit("agents", CHAT_LIMIT), async (req: Request, res: Response) => {
+  const text = (req.body?.text ?? "").toString().trim();
+  if (!text) return res.status(400).json({ error: "Provide the claim text to re-verify." });
+  if (text.length > MAX_PROMPT_CHARS) return res.status(400).json({ error: "Claim too long." });
+  if (!hasApiKey()) return res.status(503).json({ error: "No Anthropic API key configured." });
+  try {
+    const result = await reverifyClaim(text);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Re-verify failed." });
+  }
 });
 
 // ── serve the built frontend in production, if present ──

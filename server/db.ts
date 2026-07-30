@@ -117,7 +117,9 @@ export interface DomainEvent {
     | "nightshift.filed"
     | "replay.done"
     | "branches.forked"
-    | "blindspots.scanned";
+    | "blindspots.scanned"
+    | "counterfactual.ran"
+    | "truth.scanned";
   actor: string;
   summary: string;
   icon?: string;
@@ -272,6 +274,14 @@ export function logBlindspots(actor: string, summary: string, cost: number): voi
   emit([{ type: "blindspots.scanned", actor, summary, icon: "ph ph-question", dot: "#d6c07a", cost, payload: {} }]);
 }
 
+export function logCounterfactual(actor: string, summary: string, cost: number): void {
+  emit([{ type: "counterfactual.ran", actor, summary, icon: "ph ph-flow-arrow", dot: "var(--color-accent-300)", cost, payload: {} }]);
+}
+
+export function logTruth(actor: string, summary: string, cost: number): void {
+  emit([{ type: "truth.scanned", actor, summary, icon: "ph ph-hourglass-medium", dot: "var(--color-accent-300)", cost, payload: {} }]);
+}
+
 // ── reads ──
 export interface EventRow {
   id: string;
@@ -391,6 +401,29 @@ export function dashboardFromEvents() {
   for (const day of days) day.spend = byDate.get(day.date) || 0;
 
   return { spend: agg.spend, tokens: agg.tokens, messages: agg.msgs, sessions: activeSessions, sessionsEver: sessionsCreated, spendDays: days };
+}
+
+/** Per-model usage leaderboard, computed from the immutable event log — real
+ *  message volume, spend, and tokens per model the workspace has routed to. */
+export interface ModelUsageRow {
+  model: string;
+  messages: number;
+  spend: number;
+  tokens: number;
+}
+export function modelLeaderboard(): ModelUsageRow[] {
+  return db
+    .prepare(
+      `SELECT json_extract(payload,'$.model') AS model,
+              COUNT(*) AS messages,
+              COALESCE(SUM(cost),0) AS spend,
+              COALESCE(SUM(input_tokens + output_tokens),0) AS tokens
+       FROM events
+       WHERE type='message.created' AND json_extract(payload,'$.model') IS NOT NULL
+       GROUP BY model
+       ORDER BY messages DESC, spend DESC`,
+    )
+    .all() as ModelUsageRow[];
 }
 
 // ── commands (thin wrappers over emit) ──

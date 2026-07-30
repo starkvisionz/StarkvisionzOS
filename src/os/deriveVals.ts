@@ -9,7 +9,6 @@ import {
   BRANCHES,
   CF_METRICS,
   CF_VERDICT,
-  CLAIMS,
   DASH_AGENTS,
   DASH_STATS,
   DASH_TASKS,
@@ -19,7 +18,6 @@ import {
   GQ,
   GTYPES,
   LIBRARY_ARTIFACTS,
-  MARKET,
   NEG_TURNS,
   PLUGINS,
   RECOVERY_STEPS,
@@ -433,7 +431,7 @@ export function deriveVals(s: State, a: Actions) {
 
   // ── attention panel ──
   const attention = [
-    { label: "Stale claims below threshold", sub: "confidence has decayed past 60%", n: CLAIMS.filter((c) => (s.claimConf[c.id] ?? c.conf) < 60).length, icon: "ph-fill ph-warning-circle", color: "#d68f9a", v: "truth" as const },
+    { label: "Stale claims below threshold", sub: "confidence has decayed past 60%", n: s.truthReal.filter((c) => (s.claimConf[c.id] ?? c.conf) < 60).length, icon: "ph-fill ph-warning-circle", color: "#d68f9a", v: "truth" as const },
     { label: "Open blind spots", sub: "gaps agents keep filling with guesses", n: (s.blindReal.length ? s.blindReal : BLIND_SPOTS).filter((b) => !s.closedSpots[b.id]).length, icon: "ph ph-question", color: "#d6c07a", v: "blind" as const },
     { label: "Nightshift items awaiting approval", sub: "drafted, not executed", n: s.nightReal.filter((f) => f.kind === "drafted").length, icon: "ph ph-moon-stars", color: "var(--color-accent)", v: "night" as const },
     { label: "Decisions with high regret", sub: "confident calls that did not hold", n: REGRET_ROWS.filter((r) => r.good === false).length, icon: "ph ph-scales", color: "#d68f9a", v: "regret" as const },
@@ -527,17 +525,18 @@ export function deriveVals(s: State, a: Actions) {
   });
   const blindClosedN = blindSource.filter((b) => s.closedSpots[b.id]).length;
 
-  // ── truth decay ──
-  const claims = CLAIMS.map((c) => {
+  // ── truth decay (real: Claude extracts + re-scores the workspace's claims) ──
+  const hasRealTruth = s.truthReal.length > 0;
+  const claims = s.truthReal.map((c) => {
     const conf = s.claimConf[c.id] ?? c.conf;
     const chk = !!s.checking[c.id];
     const color = conf >= 80 ? "var(--color-accent)" : conf >= 55 ? "#d6c07a" : "#d68f9a";
     return {
       text: c.text,
       source: c.source,
-      srcIcon: c.srcIcon,
+      srcIcon: "ph ph-file-text",
       half: c.half,
-      age: s.claimAge[c.id] ?? c.age,
+      age: s.claimAge[c.id] ?? "from the log",
       conf: conf + "%",
       color,
       border: conf < 55 ? "color-mix(in srgb,#d68f9a 34%,transparent)" : "var(--color-divider)",
@@ -549,8 +548,8 @@ export function deriveVals(s: State, a: Actions) {
       onReverify: () => a.reverify(c.id),
     };
   });
-  const confs = CLAIMS.map((c) => s.claimConf[c.id] ?? c.conf);
-  const truthAvg = Math.round(confs.reduce((x, y) => x + y, 0) / confs.length) + "%";
+  const confs = s.truthReal.map((c) => s.claimConf[c.id] ?? c.conf);
+  const truthAvg = (confs.length ? Math.round(confs.reduce((x, y) => x + y, 0) / confs.length) : 0) + "%";
   const truthStale = confs.filter((x) => x < 60).length;
 
   // ── nightshift (real Claude-generated brief from the event log) ──
@@ -623,6 +622,7 @@ export function deriveVals(s: State, a: Actions) {
     { label: "Scan for blind spots", icon: "ph ph-radar", kind: "action", run: () => { a.switchView("blind"); a.runBlind(); } },
     { label: "Settle a deadlock by negotiation", icon: "ph ph-handshake", kind: "action", run: () => { a.switchView("negotiate"); a.runNeg(); } },
     { label: "Raise stakes to production", icon: "ph ph-gauge", kind: "action", run: () => { a.switchView("dash"); a.setStake("money"); } },
+    { label: "Scan for load-bearing claims", icon: "ph ph-hourglass-medium", kind: "action", run: () => { a.switchView("truth"); a.runTruth(); } },
     { label: "Re-verify stale claims", icon: "ph ph-hourglass-medium", kind: "action", run: () => { a.switchView("truth"); a.reverifyAll(); } },
     { label: "Run multi-agent loop", icon: "ph ph-arrows-clockwise", kind: "action", run: () => { a.switchView("loop"); a.runLoop(); } },
     { label: "Run autonomous recovery", icon: "ph ph-heartbeat", kind: "action", run: () => { a.switchView("recovery"); a.runRecovery(); } },
@@ -782,27 +782,29 @@ export function deriveVals(s: State, a: Actions) {
         };
       });
 
-  // ── agent market ──
-  const marketCats = ["Coding", "Research", "Deploy", "Summarize"].map((c) => ({
-    label: c,
-    onSelect: () => a.setMarketCat(c),
-    bg: c === s.marketCat ? "color-mix(in srgb,var(--color-accent) 22%,transparent)" : "transparent",
-    color: c === s.marketCat ? "var(--color-accent-300)" : "var(--color-neutral-400)",
-    border: c === s.marketCat ? "var(--color-accent-500)" : "var(--color-divider)",
-  }));
-  const marketRows = (MARKET[s.marketCat] || []).map((r, i) => {
-    const m = agentMeta(r[4]);
+  // ── agent market (real: per-model usage leaderboard from the event log) ──
+  const marketHasReal = s.marketReal.length > 0;
+  const fmtUsd = (n: number) => "$" + (n >= 0.01 || n === 0 ? n.toFixed(2) : n.toFixed(4));
+  const marketRows = s.marketReal.map((r, i) => {
+    const avg = r.messages ? r.spend / r.messages : 0;
+    const isActive = r.model === s.modelId;
     return {
       rank: i + 1,
       rankIcon: i === 0 ? "ph-fill ph-crown" : "ph ph-circle",
       rankColor: i === 0 ? "var(--color-accent)" : "var(--color-neutral-600)",
-      name: r[0],
-      dot: m.dot,
-      success: r[1],
-      cost: r[2],
-      latency: r[3],
-      btnClass: i === 0 ? "btn-primary" : "btn-secondary",
-      btnLabel: i === 0 ? "Route here" : "Route",
+      name: r.name,
+      sub: r.sub,
+      dot: r.dot,
+      messages: String(r.messages),
+      spend: fmtUsd(r.spend),
+      avg: r.spend > 0 ? fmtUsd(avg) : "—",
+      tokens: r.tokens >= 1000 ? (r.tokens / 1000).toFixed(1) + "k" : String(r.tokens),
+      btnClass: isActive ? "btn-secondary" : i === 0 ? "btn-primary" : "btn-secondary",
+      btnLabel: isActive ? "Active" : "Route here",
+      onRoute: () => {
+        a.selectModel(r.model);
+        a.switchView("chat");
+      },
     };
   });
 
@@ -840,16 +842,27 @@ export function deriveVals(s: State, a: Actions) {
     }
   }
 
-  // ── counterfactual ──
-  const cfMetrics = CF_METRICS.map((m) => ({
-    k: m.k,
-    baseV: m.base,
-    altV: m.alt,
-    baseW: m.baseW,
-    altW: m.altW,
-    delta: m.delta,
-    deltaColor: m.good ? "var(--color-accent-300)" : "#d6bd8f",
-  }));
+  // ── counterfactual (real: Claude projects the alternate outcome) ──
+  const hasRealCf = s.cfMetricsReal.length > 0;
+  const cfMetrics = hasRealCf
+    ? s.cfMetricsReal.map((m) => ({
+        k: m.k,
+        baseV: m.base,
+        altV: m.alt,
+        baseW: m.baseW + "%",
+        altW: m.altW + "%",
+        delta: m.delta,
+        deltaColor: m.good ? "var(--color-accent-300)" : "#d6bd8f",
+      }))
+    : CF_METRICS.map((m) => ({
+        k: m.k,
+        baseV: m.base,
+        altV: m.alt,
+        baseW: m.baseW,
+        altW: m.altW,
+        delta: m.delta,
+        deltaColor: m.good ? "var(--color-accent-300)" : "#d6bd8f",
+      }));
 
   return {
     // loop
@@ -927,6 +940,13 @@ export function deriveVals(s: State, a: Actions) {
     claims,
     truthAvg,
     truthStale,
+    truthHasReal: hasRealTruth,
+    truthError: s.truthError,
+    truthEmpty: !hasRealTruth && !s.truthError,
+    runTruth: () => a.runTruth(),
+    truthBtnLabel: s.truthRunning ? "Scanning…" : hasRealTruth ? "Scan again" : "Scan the log",
+    truthBtnIcon: s.truthRunning ? "ph ph-circle-notch" : "ph ph-magnifying-glass",
+    truthSpin: s.truthRunning ? "animation:ocspin 1s linear infinite" : "",
     reverifyAll: () => a.reverifyAll(),
     runNight: () => a.runNight(),
     nightFindings,
@@ -1057,8 +1077,9 @@ export function deriveVals(s: State, a: Actions) {
     replayBtnLabel: s.replayRunning ? "Replaying…" : s.replayDone ? "Replay again" : "Replay last turn",
     replayBtnIcon: s.replayRunning ? "ph ph-circle-notch" : s.replayDone ? "ph ph-arrow-counter-clockwise" : "ph ph-clock-clockwise",
     replaySpin: s.replayRunning ? "animation:ocspin 1s linear infinite" : "",
-    marketCats,
     marketRows,
+    marketHasReal,
+    marketEmpty: !marketHasReal,
     recSteps,
     runRecovery: () => a.runRecovery(),
     recDone: s.recDone,
@@ -1066,12 +1087,17 @@ export function deriveVals(s: State, a: Actions) {
     recBtnIcon: s.recRunning ? "ph ph-circle-notch" : s.recDone ? "ph ph-arrow-counter-clockwise" : "ph ph-play",
     recSpin: s.recRunning ? "animation:ocspin 1s linear infinite" : "",
     runCounter: () => a.runCounter(),
-    cfDone: s.cfDone,
-    cfPending: !s.cfDone,
+    cfDone: s.cfDone && hasRealCf,
+    cfPending: !hasRealCf && !s.cfError,
+    cfError: s.cfError,
     cfMetrics,
-    cfVerdict: CF_VERDICT,
-    cfBtnLabel: s.cfRunning ? "Simulating…" : s.cfDone ? "Reset" : "Simulate outcome",
-    cfBtnIcon: s.cfRunning ? "ph ph-circle-notch" : s.cfDone ? "ph ph-arrow-counter-clockwise" : "ph ph-flow-arrow",
+    cfVerdict: hasRealCf ? s.cfVerdictReal : CF_VERDICT,
+    cfDecision: s.cfDecision,
+    cfAlternative: s.cfAlternative,
+    onCfDecision: (e: React.ChangeEvent<HTMLInputElement>) => a.setCfDecision(e.target.value),
+    onCfAlternative: (e: React.ChangeEvent<HTMLInputElement>) => a.setCfAlternative(e.target.value),
+    cfBtnLabel: s.cfRunning ? "Simulating…" : hasRealCf ? "Simulate again" : "Simulate outcome",
+    cfBtnIcon: s.cfRunning ? "ph ph-circle-notch" : "ph ph-flow-arrow",
     cfSpin: s.cfRunning ? "animation:ocspin 1s linear infinite" : "",
     isChat: s.view === "chat",
     isDash: s.view === "dash",

@@ -197,6 +197,34 @@ export interface BlindSpot {
   sev: number;
 }
 
+export interface CfMetric {
+  k: string;
+  base: string;
+  alt: string;
+  baseW: number;
+  altW: number;
+  delta: string;
+  good: boolean;
+}
+
+export interface ModelUsage {
+  model: string;
+  name: string;
+  sub: string;
+  dot: string;
+  messages: number;
+  spend: number;
+  tokens: number;
+}
+
+export interface Claim {
+  id: string;
+  text: string;
+  source: string;
+  conf: number;
+  half: string;
+}
+
 export interface State {
   view: ViewId;
   pickerOpen: boolean;
@@ -284,4 +312,13 @@ export interface State {
   blindRunning: boolean;
   blindError: string;
   blindReal: BlindSpot[];
+  cfDecision: string;
+  cfAlternative: string;
+  cfError: string;
+  cfMetricsReal: CfMetric[];
+  cfVerdictReal: string;
+  marketReal: ModelUsage[];
+  truthReal: Claim[];
+  truthRunning: boolean;
+  truthError: string;
 }
