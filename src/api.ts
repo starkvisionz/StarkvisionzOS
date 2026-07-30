@@ -121,6 +121,11 @@ export const api = {
     ),
   reverifyClaim: (text: string) =>
     jsonFetch<{ conf: number; note: string; cost: number }>("/api/truth/reverify", { method: "POST", body: JSON.stringify({ text }) }),
+  memoryGraph: () =>
+    jsonFetch<{
+      nodes: { id: string; type: string; label: string; sub: string; refs: number; ts: string; actor: string; summary: string }[];
+      edges: { from: string; to: string; label: string }[];
+    }>("/api/projections/graph"),
   getSettings: () => jsonFetch<{ settings: AppSettingsDTO }>("/api/settings"),
   putSettings: (partial: Partial<AppSettingsDTO>) =>
     jsonFetch<{ settings: AppSettingsDTO }>("/api/settings", { method: "PUT", body: JSON.stringify(partial) }),

@@ -1,17 +1,23 @@
 import { css } from "../css";
 import type { Vals } from "../os/deriveVals";
-import { SimTag } from "../components/SimTag";
 
 export function GraphView({ vals }: { vals: Vals }) {
   return (
     <div className="oc-scroll" style={css("flex:1;overflow-y:auto;padding:26px 34px 40px")}>
       <div style={css("max-width:1060px;margin:0 auto")}>
-        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Memory graph</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>the organizational memory, queryable</span><SimTag /></div>
-        <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:640px;margin:0 0 16px")}>Not a chat history — a graph built from the event links. Every requirement, decision, artifact, agent and constraint is a node, and every edge is an event that actually happened. Ask it why something exists and it walks the chain back to the turn that caused it.</p>
+        <div style={css("display:flex;align-items:center;gap:12px;margin-bottom:6px")}><h3 style={css("margin:0")}>Memory graph</h3><span style={css("font-size:12px;color:var(--color-neutral-500)")}>the organizational memory, queryable</span></div>
+        <p style={css("font-size:13px;color:var(--color-neutral-500);max-width:640px;margin:0 0 16px")}>Not a chat history — a graph built from the real event log. Every conversation thread and every Lab activity that actually happened is a node, and every edge is the real chronology or the thread that was live when the activity ran. Ask it why something exists and Claude walks the chain back through the events that caused it.</p>
+
+        {vals.gqError && (
+          <div style={css("display:flex;align-items:center;gap:10px;padding:11px 14px;margin-bottom:14px;border:1px solid color-mix(in srgb,#d68f9a 40%,transparent);border-radius:var(--radius-md);background:color-mix(in srgb,#d68f9a 12%,transparent);color:#e5b0b8;font-size:12.5px")}>
+            <i className="ph ph-warning-octagon" style={css("font-size:16px;flex:none")} />
+            <span>{vals.gqError}</span>
+          </div>
+        )}
 
         <div style={css("display:flex;align-items:center;gap:9px;padding:11px 14px;border-radius:var(--radius-md);background:linear-gradient(180deg,color-mix(in srgb,var(--color-accent) 11%,var(--color-surface)),var(--color-surface));border:1px solid var(--color-accent-600);margin-bottom:14px")}>
           <i className="ph ph-magnifying-glass" style={css("font-size:17px;color:var(--color-accent-300)")} />
-          <input value={vals.gqValue} onChange={vals.onGq} placeholder="Ask the graph — why does the retention window exist?" style={css("flex:1;background:transparent;border:0;outline:none;color:var(--color-text);font-size:13.5px;font-family:var(--font-body)")} />
+          <input value={vals.gqValue} onChange={vals.onGq} placeholder="Ask the graph — why does the datastore decision exist?" style={css("flex:1;background:transparent;border:0;outline:none;color:var(--color-text);font-size:13.5px;font-family:var(--font-body)")} />
           <button className="btn btn-primary" onClick={vals.runGq} style={css("font-size:12px;padding:4px 11px;gap:5px")}><i className={vals.gqBtnIcon} style={css(`font-size:13px;${vals.gqSpin}`)} />Trace</button>
         </div>
 
@@ -30,6 +36,15 @@ export function GraphView({ vals }: { vals: Vals }) {
           </div>
         )}
 
+        {vals.graphEmpty && (
+          <div style={css("display:flex;flex-direction:column;align-items:center;gap:12px;padding:48px 20px;text-align:center;border:1px dashed var(--color-divider);border-radius:var(--radius-lg);color:var(--color-neutral-600)")}>
+            <i className="ph ph-share-network" style={css("font-size:30px;color:var(--color-accent-300)")} />
+            <div style={css("font-size:12.5px;max-width:380px")}>The graph builds itself from the event log. Start a conversation or run a Lab tool (a loop, a replay, a scan) and the threads and activities will appear here as nodes, wired by the real chronology.</div>
+          </div>
+        )}
+
+        {vals.graphHasReal && (
+        <>
         <div style={css("display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap")}>
           {vals.graphFilters.map((f, i) => (
             <div key={i} onClick={f.onClick} className="oc-model-opt" style={css(`display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:999px;cursor:pointer;font-size:12px;background:${f.bg};border:1px solid ${f.border};color:${f.color}`)}>
@@ -76,9 +91,8 @@ export function GraphView({ vals }: { vals: Vals }) {
             </div>
             <div style={css("display:flex;align-items:center;gap:14px;padding:8px 6px 3px;font-size:10.5px;color:var(--color-neutral-600)")}>
               <span>{vals.graphCount}</span>
-              <span style={css("display:inline-flex;align-items:center;gap:5px")}><span style={css("width:14px;height:2px;background:var(--color-accent-500)")} />caused by</span>
-              <span style={css("display:inline-flex;align-items:center;gap:5px")}><span style={css("width:14px;height:0;border-top:2px dashed var(--color-neutral-600)")} />assumed / unverified</span>
-              <span style={css("margin-left:auto")}>node size = how often it is referenced</span>
+              <span style={css("display:inline-flex;align-items:center;gap:5px")}><span style={css("width:14px;height:2px;background:var(--color-accent-500)")} />event link</span>
+              <span style={css("margin-left:auto")}>node size = how connected it is</span>
             </div>
           </div>
 
@@ -129,10 +143,12 @@ export function GraphView({ vals }: { vals: Vals }) {
                   <span style={css(`font-size:12px;font-weight:600;font-family:ui-monospace,Menlo,monospace;color:${g.color}`)}>{g.v}</span>
                 </div>
               ))}
-              <div style={css("font-size:11px;color:var(--color-neutral-600);line-height:1.5;margin-top:2px")}>Dashed edges are assumptions no event supports. They are also the blind spot map.</div>
+              <div style={css("font-size:11px;color:var(--color-neutral-600);line-height:1.5;margin-top:2px")}>Every edge here is backed by a real event — the graph has no assumed links. Threads are the conversations; the ring around them is the Lab activity that ran during each.</div>
             </div>
           </div>
         </div>
+        </>
+        )}
       </div>
     </div>
   );

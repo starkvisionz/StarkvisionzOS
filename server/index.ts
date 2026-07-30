@@ -12,6 +12,7 @@ import {
   historyForModel,
   listMessages,
   listSessions,
+  memoryGraph,
   modelLeaderboard,
   putSettingsCmd,
   rebuildProjections,
@@ -19,7 +20,7 @@ import {
   renameSessionCmd,
 } from "./db.ts";
 import { DEFAULT_MODEL, MODELS, anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
-import { reverifyClaim, runBlindspots, runBranches, runCounterfactual, runLoop, runNightshift, runReplay, runTruthScan } from "./agents.ts";
+import { reverifyClaim, runBlindspots, runBranches, runCounterfactual, runGraphTrace, runLoop, runNightshift, runReplay, runTruthScan } from "./agents.ts";
 import {
   ACTOR,
   AUTH_REQUIRED,
@@ -112,6 +113,10 @@ app.get("/api/projections/models", (_req, res) => {
     return { model: r.model, name: m.name, sub: m.sub, dot: m.dot, messages: r.messages, spend: r.spend, tokens: r.tokens };
   });
   res.json({ models: rows });
+});
+
+app.get("/api/projections/graph", (_req, res) => {
+  res.json(memoryGraph());
 });
 
 // ── chat (SSE streaming) ──
@@ -376,6 +381,29 @@ app.post("/api/truth/reverify", rateLimit("agents", CHAT_LIMIT), async (req: Req
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : "Re-verify failed." });
   }
+});
+
+app.post("/api/graph/trace", rateLimit("agents", CHAT_LIMIT), async (req: Request, res: Response) => {
+  const question = (req.body?.question ?? "").toString().trim();
+  sseHeaders(res);
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+  if (!question) {
+    send("error", { message: "Ask the graph a question to trace." });
+    return res.end();
+  }
+  if (question.length > MAX_PROMPT_CHARS) {
+    send("error", { message: `Question too long (max ${MAX_PROMPT_CHARS} characters).` });
+    return res.end();
+  }
+  try {
+    await runGraphTrace(send, question);
+  } catch (err) {
+    send("error", { message: err instanceof Error ? err.message : "Graph trace failed." });
+  }
+  res.end();
 });
 
 // ── serve the built frontend in production, if present ──

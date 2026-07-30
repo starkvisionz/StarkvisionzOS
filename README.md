@@ -11,10 +11,12 @@ prompt through a different model with a real cost diff; three persona agents
 drafting parallel approaches to a decision; a scan of the real event log for
 blind spots; a projected counterfactual of a decision; and the load-bearing
 claims the workspace relies on, with re-verification). The Agent market is a real
-per-model usage leaderboard computed from the event log. The remaining **Lab**
-views (memory graph, recovery, regret, negotiation) are interactive
-**simulations** of where the concept could go; each is clearly labeled
-`Simulated` in the UI.
+per-model usage leaderboard computed from the event log. The Memory graph is a
+real graph built from the event log — conversation threads and Lab activities as
+nodes, wired by the actual chronology — that Claude can trace to answer "why does
+this exist". The remaining **Lab** views (recovery, regret, negotiation) are
+interactive **simulations** of where the concept could go; each is clearly
+labeled `Simulated` in the UI.
 
 The frontend is a faithful React/TypeScript implementation of the Claude Design
 prototype (`Starkvisionz OS.dc.html`). The visual system is **Nocturne** — its
@@ -38,8 +40,9 @@ darker ground and gradient-filled primary buttons layered on top in
 | **Counterfactual** | Real | Given a chosen option and the road not taken, Claude projects the alternate outcome metric-by-metric (values, bar magnitudes, deltas) with a verdict; logged as a `counterfactual.ran` event |
 | **Agent market** | Real | Per-model usage leaderboard computed from the immutable event log — real message volume, spend, avg cost/msg, and tokens per model; "Route here" switches the active chat model |
 | **Truth decay** | Real | Claude extracts the load-bearing factual claims from the `events` log (source, confidence, half-life); "Re-verify" re-asks Claude to re-score a claim against the current log; scans logged as a `truth.scanned` event |
+| **Memory graph** | Real | Nodes and edges built from the immutable `events` log — every conversation thread and Lab activity is a node, wired by the real chronology (`then`) and the thread live when an activity ran (`during`); all edges are event-supported, so nothing is assumed. "Trace" asks Claude to walk the real graph and explain why something exists; traces logged as a `graph.traced` event |
 | **Settings** | Real (persistence) | Persisted to the backend as a `settings.updated` event and reloaded on boot. System prompt, About text, and model drive real chat; the other toggles are saved but presentation-only for now |
-| **Lab views** | Simulated | Scripted, in-memory interactions — memory graph, recovery, regret, negotiation |
+| **Lab views** | Simulated | Scripted, in-memory interactions — recovery, regret, negotiation |
 
 Without an API key the app still runs — chat replies with a clear "no API key
 configured" message instead of calling the model, and the event store still

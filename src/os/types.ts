@@ -225,6 +225,35 @@ export interface Claim {
   half: string;
 }
 
+export interface GraphNodeReal {
+  id: string;
+  type: string;
+  label: string;
+  sub: string;
+  refs: number;
+  ts: string;
+  actor: string;
+  summary: string;
+}
+
+export interface GraphEdgeReal {
+  from: string;
+  to: string;
+  label: string;
+}
+
+export interface TracePathItem {
+  label: string;
+  type: string;
+}
+
+export interface TraceResult {
+  title: string;
+  answer: string;
+  hops: string;
+  path: TracePathItem[];
+}
+
 export interface State {
   view: ViewId;
   pickerOpen: boolean;
@@ -257,6 +286,10 @@ export interface State {
   gqValue: string;
   gqAnswered: boolean;
   gqRunning: boolean;
+  graphReal: { nodes: GraphNodeReal[]; edges: GraphEdgeReal[] } | null;
+  graphLoaded: boolean;
+  gqResult: TraceResult | null;
+  gqError: string;
   plugins: Record<string, boolean>;
   pluginCat: string;
   guards: Record<string, boolean>;

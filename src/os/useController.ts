@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BlindSpot, Block, BranchResult, CfMetric, ChatModel, Claim, LoopRoundSeed, Message, ModelUsage, NightFinding, ReplayDiff, State, TimelineEvent } from "./types";
+import type { BlindSpot, Block, BranchResult, CfMetric, ChatModel, Claim, LoopRoundSeed, Message, ModelUsage, NightFinding, ReplayDiff, State, TimelineEvent, TracePathItem, TraceResult } from "./types";
 import {
   INITIAL_ABOUT,
   INITIAL_LOOP_TASK,
@@ -38,12 +38,16 @@ function initialState(): State {
     paletteQuery: "",
     timeTravel: false,
     ttPos: 100,
-    graphSel: "decision",
+    graphSel: "",
     graphHidden: {},
     graphDepth: 2,
-    gqValue: "Why does the 90-day retention window exist?",
+    gqValue: "Why does the datastore decision exist?",
     gqAnswered: false,
     gqRunning: false,
+    graphReal: null,
+    graphLoaded: false,
+    gqResult: null,
+    gqError: "",
     plugins: { linear: true, slack: true, sentry: false, figma: false, gitguard: true, ledger: false },
     pluginCat: "all",
     guards: { budget: true, prodWrite: true, secrets: true, netEgress: false },
@@ -199,6 +203,7 @@ export interface Actions {
   setGraphDepth(v: number): void;
   setGqValue(v: string): void;
   runGq(): void;
+  askWhy(): void;
   togglePlugin(k: string): void;
   toggleGuard(k: string): void;
   toggleMem(k: string): void;
@@ -313,8 +318,8 @@ export function useController(): Controller {
 
   const refreshFeeds = useCallback(async () => {
     try {
-      const [ev, dash, mkt] = await Promise.all([api.events(40), api.dashboard(), api.modelLeaderboard()]);
-      setState({ events: ev.events.map(mapEvent), dash, marketReal: mkt.models as ModelUsage[] });
+      const [ev, dash, mkt, graph] = await Promise.all([api.events(40), api.dashboard(), api.modelLeaderboard(), api.memoryGraph()]);
+      setState({ events: ev.events.map(mapEvent), dash, marketReal: mkt.models as ModelUsage[], graphReal: graph, graphLoaded: true });
     } catch {
       /* backend may be momentarily unavailable */
     }
@@ -509,9 +514,35 @@ export function useController(): Controller {
       setState({ gqValue: v });
     },
     runGq() {
-      if (stateRef.current.gqRunning) return;
-      setState({ gqRunning: true, gqAnswered: false });
-      setTimeout(() => setState({ gqRunning: false, gqAnswered: true, graphSel: "retention" }), 900);
+      const st = stateRef.current;
+      if (st.gqRunning) return;
+      const question = st.gqValue.trim();
+      if (!question) return;
+      setState({ gqRunning: true, gqAnswered: false, gqError: "", gqResult: null });
+      streamSSE("/api/graph/trace", { question }, (event, data) => {
+        if (event === "trace") {
+          const path: TracePathItem[] = Array.isArray(data.path)
+            ? (data.path as Record<string, unknown>[]).map((p) => ({ label: String(p.label ?? "node"), type: String(p.type ?? "event") }))
+            : [];
+          const result: TraceResult = {
+            title: String(data.title ?? question),
+            answer: String(data.answer ?? ""),
+            hops: String(data.hops ?? ""),
+            path,
+          };
+          setState({ gqRunning: false, gqAnswered: true, gqResult: result });
+          refreshFeeds();
+        } else if (event === "error") {
+          setState({ gqRunning: false, gqAnswered: false, gqError: String(data.message || "Graph trace failed.") });
+        }
+      });
+    },
+    askWhy() {
+      const st = stateRef.current;
+      const node = st.graphReal?.nodes.find((n) => n.id === st.graphSel);
+      if (!node) return;
+      setState({ gqValue: `Why does "${node.label}" exist?` });
+      setTimeout(() => actions.runGq(), 0);
     },
     togglePlugin(k) {
       setState((s) => ({ plugins: { ...s.plugins, [k]: !s.plugins[k] } }));
