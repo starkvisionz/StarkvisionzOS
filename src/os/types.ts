@@ -254,6 +254,18 @@ export interface TraceResult {
   path: TracePathItem[];
 }
 
+export interface RecoveryStep {
+  stage: string;
+  label: string;
+  detail: string;
+}
+
+export interface RecoveryResult {
+  steps: RecoveryStep[];
+  resolved: boolean;
+  summary: string;
+}
+
 export interface State {
   view: ViewId;
   pickerOpen: boolean;
@@ -319,6 +331,9 @@ export interface State {
   recRunning: boolean;
   recDone: boolean;
   recStep: number;
+  recIncident: string;
+  recoveryReal: RecoveryResult | null;
+  recError: string;
   cfRunning: boolean;
   cfDone: boolean;
   marketCat: string;
