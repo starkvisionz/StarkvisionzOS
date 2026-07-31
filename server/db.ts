@@ -120,7 +120,8 @@ export interface DomainEvent {
     | "blindspots.scanned"
     | "counterfactual.ran"
     | "truth.scanned"
-    | "graph.traced";
+    | "graph.traced"
+    | "recovery.ran";
   actor: string;
   summary: string;
   icon?: string;
@@ -285,6 +286,10 @@ export function logTruth(actor: string, summary: string, cost: number): void {
 
 export function logGraphTrace(actor: string, summary: string, cost: number): void {
   emit([{ type: "graph.traced", actor, summary, icon: "ph ph-path", dot: "var(--color-accent-300)", cost, payload: {} }]);
+}
+
+export function logRecovery(actor: string, summary: string, cost: number): void {
+  emit([{ type: "recovery.ran", actor, summary, icon: "ph ph-heartbeat", dot: "var(--color-accent-300)", cost, payload: {} }]);
 }
 
 // ── reads ──

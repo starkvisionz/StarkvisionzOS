@@ -15,7 +15,6 @@ import {
   LIBRARY_ARTIFACTS,
   NEG_TURNS,
   PLUGINS,
-  RECOVERY_STEPS,
   REGRET_AGENTS,
   REGRET_ROWS,
   SPEND,
@@ -881,22 +880,30 @@ export function deriveVals(s: State, a: Actions) {
     };
   });
 
-  // ── auto-recovery ──
-  const completed = s.recStep;
-  const recSteps = RECOVERY_STEPS.map((r, i) => {
-    const idx = i + 1;
-    const isDone = idx <= completed;
-    const isActive = s.recRunning && idx === completed + 1;
+  // ── auto-recovery (real — Claude closed-loop recovery) ──
+  const recHasReal = !!s.recoveryReal && s.recoveryReal.steps.length > 0;
+  const recResolved = s.recoveryReal?.resolved ?? true;
+  const recStageIcon: Record<string, string> = {
+    capture: "ph ph-camera",
+    diagnose: "ph ph-stethoscope",
+    fix: "ph ph-wrench",
+    approve: "ph ph-hand",
+    redeploy: "ph ph-rocket-launch",
+    verify: "ph ph-check",
+  };
+  const recSteps = (s.recoveryReal?.steps ?? []).map((r, i) => {
+    const last = i === (s.recoveryReal?.steps.length ?? 0) - 1;
+    const good = !last || recResolved;
     return {
       label: r.label,
       detail: r.detail,
-      icon: isDone ? "ph ph-check" : isActive ? "ph ph-circle-notch" : "ph ph-circle",
-      spin: isActive ? "animation:ocspin 1s linear infinite" : "",
-      ring: isDone ? "var(--color-accent)" : isActive ? "var(--color-accent-400)" : "var(--color-neutral-700)",
-      iconColor: isDone ? "var(--color-accent)" : isActive ? "var(--color-accent-300)" : "var(--color-neutral-600)",
-      textColor: !isDone && !isActive ? "var(--color-neutral-500)" : "var(--color-neutral-200)",
-      tagColor: isDone || isActive ? "var(--color-accent-300)" : "var(--color-neutral-700)",
-      status: isDone ? "done" : isActive ? "running" : "queued",
+      icon: recStageIcon[r.stage] || "ph ph-check",
+      spin: "",
+      ring: good ? "var(--color-accent)" : "#d68f9a",
+      iconColor: good ? "var(--color-accent)" : "#d68f9a",
+      textColor: "var(--color-neutral-200)",
+      tagColor: good ? "var(--color-accent-300)" : "#d68f9a",
+      status: r.stage,
     };
   });
 
@@ -1144,10 +1151,16 @@ export function deriveVals(s: State, a: Actions) {
     marketHasReal,
     marketEmpty: !marketHasReal,
     recSteps,
+    recHasReal,
+    recResolved,
+    recSummary: s.recoveryReal?.summary ?? "",
+    recError: s.recError,
+    recIncident: s.recIncident,
+    onRecIncident: (e: React.ChangeEvent<HTMLTextAreaElement>) => a.setRecIncident(e.target.value),
     runRecovery: () => a.runRecovery(),
-    recDone: s.recDone,
-    recBtnLabel: s.recRunning ? "Recovering…" : s.recDone ? "Run again" : "Run recovery",
-    recBtnIcon: s.recRunning ? "ph ph-circle-notch" : s.recDone ? "ph ph-arrow-counter-clockwise" : "ph ph-play",
+    recDone: s.recDone && recHasReal,
+    recBtnLabel: s.recRunning ? "Recovering…" : recHasReal ? "Run again" : "Run recovery",
+    recBtnIcon: s.recRunning ? "ph ph-circle-notch" : recHasReal ? "ph ph-arrow-counter-clockwise" : "ph ph-play",
     recSpin: s.recRunning ? "animation:ocspin 1s linear infinite" : "",
     runCounter: () => a.runCounter(),
     cfDone: s.cfDone && hasRealCf,
