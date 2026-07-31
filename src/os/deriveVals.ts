@@ -12,11 +12,6 @@ import {
   DASH_AGENTS,
   DASH_STATS,
   DASH_TASKS,
-  EDGES,
-  GDET,
-  GN,
-  GQ,
-  GTYPES,
   LIBRARY_ARTIFACTS,
   NEG_TURNS,
   PLUGINS,
@@ -639,95 +634,173 @@ export function deriveVals(s: State, a: Actions) {
   const ttLabel = s.ttPos >= 100 ? "now · 21:41" : s.ttPos >= 74 ? "21:14 · deploy 37" : s.ttPos >= 48 ? "20:58 · PRD imported" : s.ttPos >= 22 ? "Jan 2026 · kickoff" : "project start";
   const ttEvents = Math.round(2100 * (s.ttPos / 100));
 
-  // ── memory graph ──
-  const nodeById: Record<string, (typeof GN)[number]> = {};
-  GN.forEach((n) => (nodeById[n.id] = n));
-  const gsel = s.graphSel;
+  // ── memory graph (real — built from the event log) ──
+  const RTYPE: Record<string, { label: string; color: string; glyph: string; icon: string }> = {
+    session: { label: "Threads", color: "var(--color-accent-300)", glyph: "TH", icon: "ph ph-chats-circle" },
+    loop: { label: "Loops", color: "var(--color-accent)", glyph: "LP", icon: "ph ph-arrows-clockwise" },
+    nightshift: { label: "Nightshift", color: "#8fb7d6", glyph: "NS", icon: "ph ph-moon-stars" },
+    replay: { label: "Replays", color: "#8fb7d6", glyph: "RP", icon: "ph ph-swap" },
+    branches: { label: "Branches", color: "#8fb7d6", glyph: "BR", icon: "ph ph-git-branch" },
+    blindspot: { label: "Blind spots", color: "#d6c07a", glyph: "BS", icon: "ph ph-warning" },
+    counterfactual: { label: "Counterfactuals", color: "#8fb7d6", glyph: "CF", icon: "ph ph-flow-arrow" },
+    truth: { label: "Truth scans", color: "#d6c07a", glyph: "TR", icon: "ph ph-seal-check" },
+    trace: { label: "Graph traces", color: "var(--color-accent-300)", glyph: "GT", icon: "ph ph-path" },
+  };
+  const rtype = (t: string) => RTYPE[t] || { label: t, color: "var(--color-neutral-300)", glyph: "•", icon: "ph ph-circle" };
+  const relAgo = (iso: string): string => {
+    if (!iso) return "—";
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!isFinite(ms)) return "—";
+    const m = Math.floor(ms / 60000);
+    if (m < 1) return "just now";
+    if (m < 60) return m + "m";
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + "h";
+    return Math.floor(h / 24) + "d";
+  };
+
+  const realNodes = s.graphReal?.nodes ?? [];
+  const realEdges = s.graphReal?.edges ?? [];
+  const graphHasReal = realNodes.length > 0;
+  const graphEmpty = s.graphLoaded && !graphHasReal;
   const hidden = s.graphHidden || {};
   const depth = s.graphDepth ?? 2;
-  const neighbors = (id: string) => EDGES.filter((e) => e[0] === id || e[1] === id).map((e) => (e[0] === id ? e[1] : e[0]));
+  const nodeMap: Record<string, (typeof realNodes)[number]> = {};
+  realNodes.forEach((n) => (nodeMap[n.id] = n));
+
+  // selected node — default to the most-connected node
+  const defaultSel = graphHasReal ? [...realNodes].sort((x, y) => y.refs - x.refs)[0].id : "";
+  const gsel = s.graphSel && nodeMap[s.graphSel] ? s.graphSel : defaultSel;
+
+  // deterministic client-side layout: threads on an inner ring, activities on an
+  // outer ring, in chronological order. Node radius scales with connectivity.
+  const CX = 310;
+  const CY = 214;
+  const maxRefs = Math.max(1, ...realNodes.map((n) => n.refs));
+  const positions: Record<string, { x: number; y: number; r: number }> = {};
+  const placeRing = (list: typeof realNodes, rx: number, ry: number, phase: number) =>
+    list.forEach((n, i) => {
+      const ang = phase + (list.length <= 1 ? 0 : (i / list.length) * Math.PI * 2);
+      const r = 14 + Math.round((n.refs / maxRefs) * 14);
+      positions[n.id] = { x: CX + rx * Math.cos(ang), y: CY + ry * Math.sin(ang), r };
+    });
+  const inner = realNodes.filter((n) => n.type === "session");
+  const outer = realNodes.filter((n) => n.type !== "session");
+  if (inner.length === 0) placeRing(outer, 200, 132, -Math.PI / 2);
+  else if (outer.length === 0) placeRing(inner, 200, 132, -Math.PI / 2);
+  else {
+    placeRing(inner, 96, 66, -Math.PI / 2);
+    placeRing(outer, 234, 150, -Math.PI / 2 + Math.PI / Math.max(1, outer.length));
+  }
+
+  const neighborsOf = (id: string) => realEdges.filter((e) => e.from === id || e.to === id).map((e) => (e.from === id ? e.to : e.from));
   const reach = new Set<string>([gsel]);
   for (let d = 0; d < depth; d++) {
     const add: string[] = [];
-    reach.forEach((id) => neighbors(id).forEach((n) => add.push(n)));
-    add.forEach((n) => reach.add(n));
+    reach.forEach((id) => neighborsOf(id).forEach((x) => add.push(x)));
+    add.forEach((x) => reach.add(x));
   }
-  const visible = (id: string) => !hidden[nodeById[id].type];
-  const graphNodes = GN.filter((n) => visible(n.id)).map((n) => {
+  const visibleNode = (n: (typeof realNodes)[number]) => !hidden[n.type];
+
+  const graphNodes = realNodes.filter(visibleNode).map((n) => {
+    const p = positions[n.id];
     const on = n.id === gsel;
     const near = reach.has(n.id);
-    const c = GTYPES[n.type].color;
+    const c = rtype(n.type).color;
     return {
-      x: n.x,
-      y: n.y,
-      r: n.r,
+      x: p.x,
+      y: p.y,
+      r: p.r,
       label: n.label,
       sub: n.sub,
-      glyph: n.glyph,
-      leftPct: (n.x / 620) * 100 + "%",
-      topPct: (n.y / 430) * 100 + "%",
-      labelTopPct: ((n.y + n.r + 5) / 430) * 100 + "%",
+      glyph: rtype(n.type).glyph,
+      leftPct: (p.x / 620) * 100 + "%",
+      topPct: (p.y / 430) * 100 + "%",
+      labelTopPct: ((p.y + p.r + 5) / 430) * 100 + "%",
       iconFill: on ? "var(--color-bg)" : c,
       op: near ? "1" : "0.32",
       halo: on,
-      haloR: n.r + 9,
+      haloR: p.r + 9,
       haloFill: "color-mix(in srgb," + c + " 22%,transparent)",
       fill: on ? c : "color-mix(in srgb," + c + " 15%,var(--color-surface))",
-      stroke: on ? c : n.type === "gap" ? "#d68f9a" : "color-mix(in srgb," + c + " 55%,transparent)",
+      stroke: on ? c : "color-mix(in srgb," + c + " 55%,transparent)",
       sw: on ? 3 : 1.5,
       textFill: on ? "var(--color-neutral-100)" : "var(--color-neutral-400)",
       onClick: () => a.selectGraphNode(n.id),
     };
   });
-  const graphEdges = EDGES.filter(([x, y]) => visible(x) && visible(y)).map(([x, y, label, dashed]) => {
-    const na = nodeById[x];
-    const nb = nodeById[y];
-    const hot = x === gsel || y === gsel;
-    return {
-      x1: na.x,
-      y1: na.y,
-      x2: nb.x,
-      y2: nb.y,
-      lx: (((na.x + nb.x) / 2) / 620) * 100 + "%",
-      lyPct: (((na.y + nb.y) / 2) / 430) * 100 + "%",
-      label: hot ? label : "",
-      labelFill: "var(--color-accent-200)",
-      stroke: dashed ? (hot ? "#d68f9a" : "color-mix(in srgb,#d68f9a 45%,transparent)") : hot ? "var(--color-accent-400)" : "var(--color-divider)",
-      w: hot ? 2 : 1,
-      dash: dashed ? "4 4" : "0",
-    };
-  });
-  const graphFilters = Object.keys(GTYPES).map((t) => {
+  const graphEdges = realEdges
+    .filter((e) => nodeMap[e.from] && nodeMap[e.to] && visibleNode(nodeMap[e.from]) && visibleNode(nodeMap[e.to]))
+    .map((e) => {
+      const pa = positions[e.from];
+      const pb = positions[e.to];
+      const hot = e.from === gsel || e.to === gsel;
+      return {
+        x1: pa.x,
+        y1: pa.y,
+        x2: pb.x,
+        y2: pb.y,
+        lx: (((pa.x + pb.x) / 2) / 620) * 100 + "%",
+        lyPct: (((pa.y + pb.y) / 2) / 430) * 100 + "%",
+        label: hot ? e.label : "",
+        labelFill: "var(--color-accent-200)",
+        stroke: hot ? "var(--color-accent-400)" : "var(--color-divider)",
+        w: hot ? 2 : 1,
+        dash: "0",
+      };
+    });
+  const typesPresent = Array.from(new Set(realNodes.map((n) => n.type)));
+  const graphFilters = typesPresent.map((t) => {
     const off = !!hidden[t];
+    const rt = rtype(t);
     return {
-      label: GTYPES[t].label,
-      dot: GTYPES[t].color,
-      n: GN.filter((n) => n.type === t).length,
+      label: rt.label,
+      dot: rt.color,
+      n: realNodes.filter((n) => n.type === t).length,
       onClick: () => a.toggleGraphType(t),
-      bg: off ? "transparent" : "color-mix(in srgb," + GTYPES[t].color + " 14%,var(--color-surface))",
-      border: off ? "var(--color-divider)" : "color-mix(in srgb," + GTYPES[t].color + " 45%,transparent)",
+      bg: off ? "transparent" : "color-mix(in srgb," + rt.color + " 14%,var(--color-surface))",
+      border: off ? "var(--color-divider)" : "color-mix(in srgb," + rt.color + " 45%,transparent)",
       color: off ? "var(--color-neutral-600)" : "var(--color-neutral-200)",
     };
   });
-  const gd = GDET[gsel] || GDET.decision;
-  const gsNode = nodeById[gsel] || nodeById.decision;
-  const gsColor = GTYPES[gsNode.type].color;
-  const selStats = gd.stats.map((x) => ({ v: x[0], k: x[1] }));
-  const selProv = gd.prov.map((x) => ({ icon: x[0], label: x[1], meta: x[2] }));
-  const graphSelLinks = gd.links.map((x) => ({ icon: x[0], label: x[1], rel: x[2], onClick: () => a.selectGraphNode(x[3]) }));
+  const selNode = nodeMap[gsel];
+  const selRt = selNode ? rtype(selNode.type) : rtype("session");
+  const gsColor = selRt.color;
+  const selEdges = realEdges.filter((e) => e.from === gsel || e.to === gsel);
+  const selStats = selNode
+    ? [
+        { v: String(selNode.refs), k: "links" },
+        { v: String(selEdges.length), k: "edges" },
+        { v: relAgo(selNode.ts), k: "age" },
+      ]
+    : [];
+  const selProv = selNode
+    ? [
+        { icon: "ph ph-scroll", label: "Event " + selNode.id.replace(/^[se]:/, "").slice(0, 12), meta: selRt.label + " · " + relAgo(selNode.ts) + " ago" },
+        ...(selNode.actor ? [{ icon: "ph ph-user", label: "Actor: " + selNode.actor, meta: "recorded in the event log" }] : []),
+        { icon: "ph ph-database", label: "Backed by a real event", meta: "no assumption" },
+      ]
+    : [];
+  const graphSelLinks = selEdges.map((e) => {
+    const otherId = e.from === gsel ? e.to : e.from;
+    const o = nodeMap[otherId];
+    return { icon: rtype(o.type).icon, label: o.label, rel: e.label, onClick: () => a.selectGraphNode(otherId) };
+  });
+  const orphanCount = realNodes.filter((n) => !realEdges.some((e) => e.from === n.id || e.to === n.id)).length;
+  const tsSorted = realNodes.map((n) => n.ts).filter(Boolean).sort();
   const graphHealth = [
-    { label: "Nodes / edges", v: GN.length + " / " + EDGES.length, icon: "ph ph-share-network", color: "var(--color-neutral-300)" },
-    { label: "Unsupported assumptions", v: String(EDGES.filter((e) => e[3]).length), icon: "ph ph-warning-octagon", color: "#d68f9a" },
-    { label: "Orphan nodes", v: "0", icon: "ph ph-circle-dashed", color: "var(--color-accent)" },
-    { label: "Mean claim confidence", v: truthAvg, icon: "ph ph-hourglass-medium", color: "var(--color-accent)" },
+    { label: "Nodes / edges", v: realNodes.length + " / " + realEdges.length, icon: "ph ph-share-network", color: "var(--color-neutral-300)" },
+    { label: "Assumed edges", v: "0", icon: "ph ph-seal-check", color: "var(--color-accent)" },
+    { label: "Orphan nodes", v: String(orphanCount), icon: "ph ph-circle-dashed", color: orphanCount ? "#d6c07a" : "var(--color-accent)" },
+    { label: "Time span", v: tsSorted.length ? relAgo(tsSorted[0]) : "—", icon: "ph ph-clock-counter-clockwise", color: "var(--color-neutral-300)" },
   ];
-  const gqPath = GQ.path.map((p, i) => ({
-    label: p[0],
+  const gqPath = (s.gqResult?.path ?? []).map((p, i) => ({
+    label: p.label,
     icon: "ph ph-circle-half",
-    color: GTYPES[nodeById[p[1]].type].color,
-    bg: "color-mix(in srgb," + GTYPES[nodeById[p[1]].type].color + " 13%,var(--color-surface))",
-    border: "color-mix(in srgb," + GTYPES[nodeById[p[1]].type].color + " 40%,transparent)",
-    arrow: i < GQ.path.length - 1,
+    color: rtype(p.type).color,
+    bg: "color-mix(in srgb," + rtype(p.type).color + " 13%,var(--color-surface))",
+    border: "color-mix(in srgb," + rtype(p.type).color + " 40%,transparent)",
+    arrow: i < (s.gqResult?.path.length ?? 0) - 1,
   }));
 
   // ── agent branches (real: three Claude personas draft candidate approaches) ──
@@ -1003,41 +1076,31 @@ export function deriveVals(s: State, a: Actions) {
     graphHealth,
     selStats,
     selProv,
-    graphSelType: gd.type,
-    graphSelTitle: gd.title,
-    graphSelNote: gd.note,
-    selIcon:
-      gsNode.type === "gap"
-        ? "ph-fill ph-warning-octagon"
-        : gsNode.type === "decision"
-          ? "ph ph-git-fork"
-          : gsNode.type === "agent"
-            ? "ph ph-hammer"
-            : gsNode.type === "req"
-              ? "ph ph-file-text"
-              : gsNode.type === "constraint"
-                ? "ph ph-coins"
-                : gsNode.type === "cost"
-                  ? "ph ph-currency-dollar"
-                  : "ph ph-database",
+    graphHasReal,
+    graphEmpty,
+    graphSelType: selRt.label,
+    graphSelTitle: selNode?.label ?? "—",
+    graphSelNote: selNode?.summary ?? "Select a node to see how it was produced.",
+    selIcon: selRt.icon,
     selColor: gsColor,
     selBg: "color-mix(in srgb," + gsColor + " 20%,transparent)",
-    selConf: gsNode.conf + "% conf",
-    selTagClass: gsNode.conf < 50 ? "tag tag-accent-2" : "tag tag-neutral",
-    graphCount: graphNodes.length + " of " + GN.length + " nodes shown",
+    selConf: selNode ? selNode.refs + " links" : "—",
+    selTagClass: "tag tag-neutral",
+    graphCount: graphNodes.length + " of " + realNodes.length + " nodes shown",
     depthVal: s.graphDepth,
     onDepth: (e: React.ChangeEvent<HTMLInputElement>) => a.setGraphDepth(parseInt(e.target.value)),
     gqValue: s.gqValue,
     onGq: (e: React.ChangeEvent<HTMLInputElement>) => a.setGqValue(e.target.value),
     runGq: () => a.runGq(),
-    gqAnswered: s.gqAnswered,
+    gqAnswered: s.gqAnswered && !!s.gqResult,
+    gqError: s.gqError,
     gqBtnIcon: s.gqRunning ? "ph ph-circle-notch" : "ph ph-path",
     gqSpin: s.gqRunning ? "animation:ocspin 1s linear infinite" : "",
-    gqTitle: GQ.title,
-    gqHops: GQ.hops,
-    gqAnswer: GQ.answer,
+    gqTitle: s.gqResult?.title ?? "",
+    gqHops: s.gqResult?.hops ?? "",
+    gqAnswer: s.gqResult?.answer ?? "",
     gqPath,
-    askWhy: () => a.runGq(),
+    askWhy: () => a.askWhy(),
     goRiskTab: () => { a.switchView("settings"); a.setSettingsTab("risk"); },
     stakeSummary: stake.policy[1][1] + " reviewer(s) · " + stake.policy[2][1].toLowerCase() + " gated · " + stake.policy[0][1],
     branches,

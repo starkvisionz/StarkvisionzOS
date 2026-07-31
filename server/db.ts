@@ -119,7 +119,8 @@ export interface DomainEvent {
     | "branches.forked"
     | "blindspots.scanned"
     | "counterfactual.ran"
-    | "truth.scanned";
+    | "truth.scanned"
+    | "graph.traced";
   actor: string;
   summary: string;
   icon?: string;
@@ -282,6 +283,10 @@ export function logTruth(actor: string, summary: string, cost: number): void {
   emit([{ type: "truth.scanned", actor, summary, icon: "ph ph-hourglass-medium", dot: "var(--color-accent-300)", cost, payload: {} }]);
 }
 
+export function logGraphTrace(actor: string, summary: string, cost: number): void {
+  emit([{ type: "graph.traced", actor, summary, icon: "ph ph-path", dot: "var(--color-accent-300)", cost, payload: {} }]);
+}
+
 // ── reads ──
 export interface EventRow {
   id: string;
@@ -424,6 +429,140 @@ export function modelLeaderboard(): ModelUsageRow[] {
        ORDER BY messages DESC, spend DESC`,
     )
     .all() as ModelUsageRow[];
+}
+
+/** The memory graph — nodes and edges built from the immutable event log, not a
+ *  hand-drawn diagram. Every conversation thread and every Lab activity that
+ *  actually happened becomes a node; edges are the real chronology ("then") plus
+ *  the thread that was live when an activity ran ("during"). All edges are
+ *  event-supported, so the graph has no assumed links. */
+export interface GraphNodeOut {
+  id: string;
+  type: string;
+  label: string;
+  sub: string;
+  refs: number;
+  ts: string;
+  actor: string;
+  summary: string;
+}
+export interface GraphEdgeOut {
+  from: string;
+  to: string;
+  label: string;
+}
+export interface MemoryGraph {
+  nodes: GraphNodeOut[];
+  edges: GraphEdgeOut[];
+}
+
+const GRAPH_LAB_TYPES = [
+  "loop.converged",
+  "nightshift.filed",
+  "replay.done",
+  "branches.forked",
+  "blindspots.scanned",
+  "counterfactual.ran",
+  "truth.scanned",
+  "graph.traced",
+] as const;
+const GRAPH_KIND: Record<string, string> = {
+  "loop.converged": "loop",
+  "nightshift.filed": "nightshift",
+  "replay.done": "replay",
+  "branches.forked": "branches",
+  "blindspots.scanned": "blindspot",
+  "counterfactual.ran": "counterfactual",
+  "truth.scanned": "truth",
+  "graph.traced": "trace",
+};
+const GRAPH_LABEL: Record<string, string> = {
+  loop: "Loop converged",
+  nightshift: "Nightshift brief",
+  replay: "Model replay",
+  branches: "Agent branches",
+  blindspot: "Blind-spot scan",
+  counterfactual: "Counterfactual",
+  truth: "Truth scan",
+  trace: "Graph trace",
+};
+
+export function memoryGraph(limit = 13): MemoryGraph {
+  const sessions = db
+    .prepare(
+      `SELECT s.id, s.title, s.model, s.created_at,
+              (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS msgs
+       FROM sessions s WHERE s.deleted_at IS NULL ORDER BY s.created_at ASC`,
+    )
+    .all() as { id: string; title: string; model: string; created_at: string; msgs: number }[];
+
+  const labs = db
+    .prepare(
+      `SELECT id, type, actor, summary, created_at FROM events
+       WHERE type IN (${GRAPH_LAB_TYPES.map(() => "?").join(",")}) ORDER BY created_at ASC`,
+    )
+    .all(...GRAPH_LAB_TYPES) as { id: string; type: string; actor: string; summary: string; created_at: string }[];
+
+  const candidates: GraphNodeOut[] = [];
+  for (const s of sessions) {
+    const title = (s.title || "").trim() || "Untitled thread";
+    candidates.push({
+      id: "s:" + s.id,
+      type: "session",
+      label: title.length > 22 ? title.slice(0, 21) + "…" : title,
+      sub: (s.model || "").replace(/^claude-/, ""),
+      refs: s.msgs,
+      ts: s.created_at,
+      actor: "",
+      summary: `Conversation thread — ${s.msgs} message(s) on ${s.model}.`,
+    });
+  }
+  for (const l of labs) {
+    const kind = GRAPH_KIND[l.type] || "event";
+    candidates.push({
+      id: "e:" + l.id,
+      type: kind,
+      label: GRAPH_LABEL[kind] || kind,
+      sub: "",
+      refs: 1,
+      ts: l.created_at,
+      actor: l.actor,
+      summary: l.summary,
+    });
+  }
+
+  // Keep the most recent `limit` nodes, then order chronologically for layout/edges.
+  candidates.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
+  const nodes = candidates.slice(0, limit).sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+
+  const edges: GraphEdgeOut[] = [];
+  // Real chronology: each node "then" the next.
+  for (let i = 1; i < nodes.length; i++) {
+    edges.push({ from: nodes[i - 1].id, to: nodes[i].id, label: "then" });
+  }
+  // "during": a Lab activity links to the thread that was most recently opened
+  //  at or before it ran — the conversation that was live at the time.
+  const sessionNodes = nodes.filter((n) => n.type === "session");
+  for (const n of nodes) {
+    if (n.type === "session") continue;
+    let host: GraphNodeOut | undefined;
+    for (const s of sessionNodes) {
+      if (s.ts <= n.ts) host = s;
+      else break;
+    }
+    if (host) edges.push({ from: host.id, to: n.id, label: "during" });
+  }
+
+  // Reference count reflects real connectivity (message volume for threads,
+  //  plus the edges each node participates in).
+  const degree = new Map<string, number>();
+  for (const e of edges) {
+    degree.set(e.from, (degree.get(e.from) || 0) + 1);
+    degree.set(e.to, (degree.get(e.to) || 0) + 1);
+  }
+  for (const n of nodes) n.refs = n.refs + (degree.get(n.id) || 0);
+
+  return { nodes, edges };
 }
 
 // ── commands (thin wrappers over emit) ──

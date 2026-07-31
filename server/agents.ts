@@ -2,7 +2,7 @@
 // brief. Both call the Anthropic API for real and log a domain event when done.
 
 import { anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
-import { latestExchange, logBlindspots, logBranches, logConverged, logCounterfactual, logNightshift, logReplay, logTruth, recentEvents } from "./db.ts";
+import { latestExchange, logBlindspots, logBranches, logConverged, logCounterfactual, logGraphTrace, logNightshift, logReplay, logTruth, memoryGraph, recentEvents } from "./db.ts";
 
 type Send = (event: string, data: unknown) => void;
 
@@ -429,4 +429,47 @@ export async function reverifyClaim(text: string): Promise<{ conf: number; note:
   const parsed = (extractJson(r.text) || {}) as Record<string, unknown>;
   const conf = Math.max(0, Math.min(100, Math.round(Number(parsed.conf ?? 60))));
   return { conf, note: String(parsed.note || "").trim(), cost };
+}
+
+/** Trace a "why does X exist?" question through the real memory graph. Claude is
+ *  given the actual nodes and edges built from the event log and must answer by
+ *  walking that chain — returning the ordered path plus a grounded explanation.
+ *  Logged as a `graph.traced` event. */
+export async function runGraphTrace(send: Send, question: string): Promise<void> {
+  if (!hasApiKey()) {
+    send("error", { message: "No Anthropic API key configured — set ANTHROPIC_API_KEY to trace the memory graph." });
+    return;
+  }
+  const g = memoryGraph(20);
+  if (!g.nodes.length) {
+    send("error", { message: "The memory graph is empty — chat or run a Lab tool and the graph builds itself from the event log." });
+    return;
+  }
+  const byId = new Map(g.nodes.map((n) => [n.id, n]));
+  const nodesDesc = g.nodes.map((n) => `[${n.type}] ${n.label} — ${n.summary}`).join("\n");
+  const edgesDesc = g.edges.map((e) => `${byId.get(e.from)?.label ?? e.from} --${e.label}--> ${byId.get(e.to)?.label ?? e.to}`).join("\n");
+  const prompt =
+    `A memory graph built from an AI workspace's real event log.\n\nNodes:\n${nodesDesc}\n\nEdges:\n${edgesDesc}\n\n` +
+    `Question: "${question}"\n\n` +
+    `Answer by walking the graph. Use ONLY the nodes and edges above; if they do not support an answer, say so plainly. ` +
+    `Return ONLY JSON: {"title":"<the question, restated as a short title>","answer":"<2-3 sentences grounded in the nodes/edges>","path":[{"label":"<node label>","type":"<node type>"}]} ` +
+    `where path is the ordered chain of 2-5 nodes that leads to the answer.`;
+  const r = await claudeText(AUTHOR_MODEL, "You trace provenance through a graph precisely, using only the given nodes and edges. Respond only with the requested JSON.", prompt, 700);
+  const cost = costFor(AUTHOR_MODEL, r.inTok, r.outTok);
+  const parsed = (extractJson(r.text) || {}) as Record<string, unknown>;
+  const path = Array.isArray(parsed.path)
+    ? parsed.path
+        .filter((x) => x && typeof x === "object")
+        .map((x) => {
+          const o = x as Record<string, unknown>;
+          return { label: String(o.label || "node"), type: String(o.type || "event") };
+        })
+        .slice(0, 6)
+    : [];
+  const title = String(parsed.title || question).trim();
+  const answer = String(parsed.answer || r.text.slice(0, 400)).trim();
+  const hops = `${path.length} node(s) · ${g.edges.length} edges`;
+
+  logGraphTrace("hub", `Traced the memory graph: ${question.slice(0, 80)}`, cost);
+  send("trace", { title, answer, path, hops, cost });
 }
