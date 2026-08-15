@@ -16,6 +16,6 @@
     "typescript": "^5.6.3"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "sharp", "workerd"]
+    "onlyBuiltDependencies": ["esbuild", "sharp", "unrs-resolver", "workerd"]
   }
 }

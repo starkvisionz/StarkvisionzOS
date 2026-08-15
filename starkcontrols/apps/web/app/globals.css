@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+ * Starkvisionz Holdings brand tokens.
+ * These two are the fixed points of the StarkControls palette; everything else
+ * in later sessions derives from them.
+ * ------------------------------------------------------------------------- */
+:root {
+  --void-black: #0A0A0A;
+  --sovereign-gold: #C9A227;
+
+  --background: #ffffff;
+  --foreground: var(--void-black);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-void-black: var(--void-black);
+  --color-sovereign-gold: var(--sovereign-gold);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: var(--void-black);
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
