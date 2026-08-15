@@ -195,3 +195,11 @@ CI runs `-m "not integration"`, as specified.
 It is part of the locked stack and the EVM work in a later session needs it, so
 it is pinned now (`>=2.2,<2.3`) rather than added later. Nothing in Session 01
 imports it.
+
+### D-23 · The CI workflow is mirrored to the repository root
+
+GitHub only executes workflows found in the root `.github/workflows/`, but the
+spec places the file at `starkcontrols/.github/workflows/ci.yml` (it assumes
+`starkcontrols/` is the repo root — see D-01). Both files exist and are kept
+byte-identical: the root copy is what runs, the in-tree copy is what the spec
+asks for, and a `workflow-sync` job diffs the two so they cannot silently drift.
