@@ -1,0 +1,49 @@
+name = "starkcontrols-edge"
+main = "src/index.ts"
+compatibility_date = "2026-08-15"
+# postgres.js needs Node built-ins (net, tls, crypto) inside the Worker.
+compatibility_flags = ["nodejs_compat"]
+
+workers_dev = true
+
+# --- Hyperdrive --------------------------------------------------------------
+# `id` is the Hyperdrive config id created with:
+#   wrangler hyperdrive create starkcontrols-db --connection-string "<supabase pooler url>"
+# It is an account-scoped identifier, not a secret, but it differs per
+# environment — keep it in sync with the HYPERDRIVE_ID value in .env.example.
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "REPLACE_WITH_HYPERDRIVE_ID"
+# Used only by `wrangler dev`; set WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE
+# in your shell rather than writing a real connection string here.
+localConnectionString = "postgresql://postgres:postgres@localhost:5432/postgres"
+
+# --- R2 ----------------------------------------------------------------------
+[[r2_buckets]]
+binding = "STARKCONTROLS_FILES"
+bucket_name = "starkcontrols-files"
+preview_bucket_name = "starkcontrols-files-preview"
+
+# --- Observability -----------------------------------------------------------
+[observability]
+enabled = true
+
+[placement]
+mode = "smart"
+
+# --- Secrets (set with `wrangler secret put <NAME>`; never listed here) -------
+#   SUPABASE_JWT_SECRET
+#   COMPUTE_API_URL
+#   COMPUTE_API_KEY
+
+[env.production]
+name = "starkcontrols-edge"
+workers_dev = false
+
+[[env.production.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "REPLACE_WITH_HYPERDRIVE_ID"
+
+[[env.production.r2_buckets]]
+binding = "STARKCONTROLS_FILES"
+bucket_name = "starkcontrols-files"
