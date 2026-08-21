@@ -1,0 +1,104 @@
+# StarkControls CI.
+#
+# GitHub only reads workflows from the repository root, but this repo hosts the
+# StarkControls monorepo under starkcontrols/. This file and
+# starkcontrols/.github/workflows/ci.yml are kept byte-identical; the root copy
+# is the one GitHub executes, and the `workflow-sync` job below fails if they
+# ever drift apart. Edit either one, then copy it over the other.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# A newer push to the same branch supersedes an in-flight run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: starkcontrols
+
+jobs:
+  compute:
+    name: compute (python 3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.8.17"
+          enable-cache: true
+          cache-dependency-glob: starkcontrols/apps/compute/uv.lock
+
+      - name: Sync dependencies
+        working-directory: starkcontrols/apps/compute
+        run: uv sync --frozen --extra dev
+
+      - name: Lint
+        working-directory: starkcontrols/apps/compute
+        run: uv run ruff check .
+
+      - name: Test
+        working-directory: starkcontrols/apps/compute
+        # Integration tests need a live Postgres and are run out of band.
+        run: uv run pytest -m "not integration"
+
+  edge-web:
+    name: edge + web + shared (node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: starkcontrols/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm -r lint
+
+      - name: Test
+        run: pnpm -r test
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+  secrets:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks scans history, not just the tip commit.
+          fetch-depth: 0
+
+      - name: Scan for committed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+
+  workflow-sync:
+    name: workflow files in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Root and in-tree CI definitions must match
+        working-directory: .
+        run: diff .github/workflows/ci.yml starkcontrols/.github/workflows/ci.yml

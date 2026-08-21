@@ -1,0 +1,21 @@
+{
+  "name": "starkcontrols",
+  "private": true,
+  "version": "0.1.0",
+  "description": "StarkControls (SVH-PROD-007) — project controls platform for Starkvisionz Holdings, Inc.",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "sharp", "unrs-resolver", "workerd"]
+  }
+}
