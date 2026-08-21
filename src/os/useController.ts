@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BlindSpot, Block, BranchResult, CfMetric, ChatModel, Claim, LoopRoundSeed, Message, ModelUsage, NightFinding, ReplayDiff, State, TimelineEvent, TracePathItem, TraceResult } from "./types";
+import type { BlindSpot, Block, BranchResult, CfMetric, ChatModel, Claim, LoopRoundSeed, Message, ModelUsage, NightFinding, RecoveryResult, RecoveryStep, ReplayDiff, State, TimelineEvent, TracePathItem, TraceResult } from "./types";
 import {
   INITIAL_ABOUT,
   INITIAL_LOOP_TASK,
@@ -77,6 +77,9 @@ function initialState(): State {
     recRunning: false,
     recDone: false,
     recStep: 1,
+    recIncident: "Deploy 37 failed on Coolify — the app crashes on boot with a missing DATABASE_URL environment reference.",
+    recoveryReal: null,
+    recError: "",
     cfRunning: false,
     cfDone: false,
     marketCat: "Coding",
@@ -219,6 +222,7 @@ export interface Actions {
   setBranchTask(v: string): void;
   setMarketCat(c: string): void;
   runRecovery(): void;
+  setRecIncident(v: string): void;
   runCounter(): void;
   setCfDecision(v: string): void;
   setCfAlternative(v: string): void;
@@ -658,18 +662,32 @@ export function useController(): Controller {
     setMarketCat(c) {
       setState({ marketCat: c });
     },
+    setRecIncident(v) {
+      setState({ recIncident: v });
+    },
     runRecovery() {
-      if (stateRef.current.recRunning) return;
+      const st = stateRef.current;
+      if (st.recRunning) return;
       if (recT.current) clearInterval(recT.current);
-      setState({ recRunning: true, recDone: false, recStep: 1 });
-      recT.current = setInterval(() => {
-        setState((s) => {
-          const step = s.recStep + 1;
-          const done = step >= 8;
-          if (done && recT.current) clearInterval(recT.current);
-          return { recStep: step, recRunning: !done, recDone: done };
-        });
-      }, 750);
+      const incident = st.recIncident.trim();
+      if (!incident) return;
+      setState({ recRunning: true, recDone: false, recError: "", recoveryReal: null });
+      streamSSE("/api/recovery/run", { incident }, (event, data) => {
+        if (event === "recovery") {
+          const steps: RecoveryStep[] = Array.isArray(data.steps)
+            ? (data.steps as Record<string, unknown>[]).map((p) => ({
+                stage: String(p.stage ?? "diagnose"),
+                label: String(p.label ?? "Recovery step"),
+                detail: String(p.detail ?? ""),
+              }))
+            : [];
+          const result: RecoveryResult = { steps, resolved: data.resolved !== false, summary: String(data.summary ?? "") };
+          setState({ recRunning: false, recDone: true, recoveryReal: result });
+          refreshFeeds();
+        } else if (event === "error") {
+          setState({ recRunning: false, recDone: false, recError: String(data.message || "Recovery failed.") });
+        }
+      });
     },
     setCfDecision(v) {
       setState({ cfDecision: v });

@@ -20,7 +20,7 @@ import {
   renameSessionCmd,
 } from "./db.ts";
 import { DEFAULT_MODEL, MODELS, anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
-import { reverifyClaim, runBlindspots, runBranches, runCounterfactual, runGraphTrace, runLoop, runNightshift, runReplay, runTruthScan } from "./agents.ts";
+import { reverifyClaim, runBlindspots, runBranches, runCounterfactual, runGraphTrace, runLoop, runNightshift, runRecovery, runReplay, runTruthScan } from "./agents.ts";
 import {
   ACTOR,
   AUTH_REQUIRED,
@@ -402,6 +402,29 @@ app.post("/api/graph/trace", rateLimit("agents", CHAT_LIMIT), async (req: Reques
     await runGraphTrace(send, question);
   } catch (err) {
     send("error", { message: err instanceof Error ? err.message : "Graph trace failed." });
+  }
+  res.end();
+});
+
+app.post("/api/recovery/run", rateLimit("agents", CHAT_LIMIT), async (req: Request, res: Response) => {
+  const incident = (req.body?.incident ?? "").toString().trim();
+  sseHeaders(res);
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+  if (!incident) {
+    send("error", { message: "Describe the failure to recover from." });
+    return res.end();
+  }
+  if (incident.length > MAX_PROMPT_CHARS) {
+    send("error", { message: `Incident description too long (max ${MAX_PROMPT_CHARS} characters).` });
+    return res.end();
+  }
+  try {
+    await runRecovery(send, incident);
+  } catch (err) {
+    send("error", { message: err instanceof Error ? err.message : "Recovery failed." });
   }
   res.end();
 });

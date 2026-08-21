@@ -2,7 +2,7 @@
 // brief. Both call the Anthropic API for real and log a domain event when done.
 
 import { anthropic, costFor, hasApiKey, modelById } from "./anthropic.ts";
-import { latestExchange, logBlindspots, logBranches, logConverged, logCounterfactual, logGraphTrace, logNightshift, logReplay, logTruth, memoryGraph, recentEvents } from "./db.ts";
+import { latestExchange, logBlindspots, logBranches, logConverged, logCounterfactual, logGraphTrace, logNightshift, logRecovery, logReplay, logTruth, memoryGraph, recentEvents } from "./db.ts";
 
 type Send = (event: string, data: unknown) => void;
 
@@ -472,4 +472,46 @@ export async function runGraphTrace(send: Send, question: string): Promise<void>
 
   logGraphTrace("hub", `Traced the memory graph: ${question.slice(0, 80)}`, cost);
   send("trace", { title, answer, path, hops, cost });
+}
+
+const RECOVERY_STAGES = ["capture", "diagnose", "fix", "approve", "redeploy", "verify"] as const;
+
+/** Closed-loop incident recovery. Instead of an agent editing config until the
+ *  error changes, Claude runs a disciplined recovery: capture the last good
+ *  state, diagnose the root cause, propose an isolated fix, gate on approval,
+ *  redeploy, and verify — returning the ordered steps and a resolution. This is
+ *  a real diagnosis of the described failure (no live deploy is performed).
+ *  Logged as a `recovery.ran` event. */
+export async function runRecovery(send: Send, incident: string): Promise<void> {
+  if (!hasApiKey()) {
+    send("error", { message: "No Anthropic API key configured — set ANTHROPIC_API_KEY to run a real recovery." });
+    return;
+  }
+  const prompt =
+    `A deployment/runtime failure needs a disciplined, closed-loop recovery — not trial-and-error edits.\n\nIncident:\n${incident}\n\n` +
+    `Work the recovery in exactly these ordered stages: ${RECOVERY_STAGES.join(", ")} ` +
+    `(capture the last good state, diagnose the root cause, propose an isolated fix tested in a sandbox, gate on human approval, redeploy, verify production health). ` +
+    `For each stage give a concrete label and a one-line detail grounded in the incident. Then decide whether the recovery resolves it.\n\n` +
+    `Return ONLY JSON: {"steps":[{"stage":"<one of the stages>","label":"<short>","detail":"<one line>"}],"resolved":<true|false>,"summary":"<one sentence outcome>"}.`;
+  const r = await claudeText(AUTHOR_MODEL, "You are a rigorous site-reliability engineer running a closed-loop recovery. Respond only with the requested JSON.", prompt, 900);
+  const cost = costFor(AUTHOR_MODEL, r.inTok, r.outTok);
+  const parsed = (extractJson(r.text) || {}) as Record<string, unknown>;
+  const rawSteps = Array.isArray(parsed.steps) ? parsed.steps : [];
+  const steps = rawSteps
+    .filter((x) => x && typeof x === "object")
+    .map((x) => {
+      const o = x as Record<string, unknown>;
+      const stage = String(o.stage || "").toLowerCase();
+      return {
+        stage: (RECOVERY_STAGES as readonly string[]).includes(stage) ? stage : "diagnose",
+        label: String(o.label || "Recovery step"),
+        detail: String(o.detail || ""),
+      };
+    })
+    .slice(0, 8);
+  const resolved = parsed.resolved !== false;
+  const summary = String(parsed.summary || (resolved ? "Recovered and verified." : "Could not fully resolve — needs a human.")).trim();
+
+  logRecovery("hub", `Ran a closed-loop recovery: ${incident.slice(0, 80)}`, cost);
+  send("recovery", { steps, resolved, summary, cost });
 }

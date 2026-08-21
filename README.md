@@ -14,9 +14,11 @@ claims the workspace relies on, with re-verification). The Agent market is a rea
 per-model usage leaderboard computed from the event log. The Memory graph is a
 real graph built from the event log — conversation threads and Lab activities as
 nodes, wired by the actual chronology — that Claude can trace to answer "why does
-this exist". The remaining **Lab** views (recovery, regret, negotiation) are
-interactive **simulations** of where the concept could go; each is clearly
-labeled `Simulated` in the UI.
+this exist". Autonomous recovery is a real closed-loop incident recovery — Claude
+diagnoses a described failure and works a disciplined capture → diagnose → fix →
+approve → redeploy → verify plan. The remaining **Lab** views (regret,
+negotiation) are interactive **simulations** of where the concept could go; each
+is clearly labeled `Simulated` in the UI.
 
 The frontend is a faithful React/TypeScript implementation of the Claude Design
 prototype (`Starkvisionz OS.dc.html`). The visual system is **Nocturne** — its
@@ -41,8 +43,9 @@ darker ground and gradient-filled primary buttons layered on top in
 | **Agent market** | Real | Per-model usage leaderboard computed from the immutable event log — real message volume, spend, avg cost/msg, and tokens per model; "Route here" switches the active chat model |
 | **Truth decay** | Real | Claude extracts the load-bearing factual claims from the `events` log (source, confidence, half-life); "Re-verify" re-asks Claude to re-score a claim against the current log; scans logged as a `truth.scanned` event |
 | **Memory graph** | Real | Nodes and edges built from the immutable `events` log — every conversation thread and Lab activity is a node, wired by the real chronology (`then`) and the thread live when an activity ran (`during`); all edges are event-supported, so nothing is assumed. "Trace" asks Claude to walk the real graph and explain why something exists; traces logged as a `graph.traced` event |
+| **Autonomous recovery** | Real | Given a described failure, Claude runs a disciplined closed-loop recovery — capture last good state → diagnose root cause → isolated fix → approval gate → redeploy → verify — returning the ordered steps and a resolution; logged as a `recovery.ran` event. Claude reasons through the recovery; no live deploy is performed |
 | **Settings** | Real (persistence) | Persisted to the backend as a `settings.updated` event and reloaded on boot. System prompt, About text, and model drive real chat; the other toggles are saved but presentation-only for now |
-| **Lab views** | Simulated | Scripted, in-memory interactions — recovery, regret, negotiation |
+| **Lab views** | Simulated | Scripted, in-memory interactions — regret, negotiation |
 
 Without an API key the app still runs — chat replies with a clear "no API key
 configured" message instead of calling the model, and the event store still
