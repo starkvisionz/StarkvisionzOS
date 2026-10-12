@@ -203,3 +203,44 @@ spec places the file at `starkcontrols/.github/workflows/ci.yml` (it assumes
 `starkcontrols/` is the repo root — see D-01). Both files exist and are kept
 byte-identical: the root copy is what runs, the in-tree copy is what the spec
 asks for, and a `workflow-sync` job diffs the two so they cannot silently drift.
+
+---
+
+## Follow-up — GitHub Actions environment
+
+### D-24 · Secrets are loaded by a committed script, not pushed from a session
+
+Every GitHub Actions admin path — `actions/secrets`, `actions/variables`,
+`actions/secrets/public-key`, `environments` — is refused by the Claude Code
+session proxy, so no agent in this repo can create a secret, and no agent
+should: it would have to be handed the live credentials to do it.
+
+`scripts/sync-github-env.sh` moves that work to the operator's machine, where
+the values already are. It reads one gitignored file, classifies each name as a
+secret or a variable from a registry in the script, and pipes values to `gh` on
+stdin so they never reach the process table. It refuses a value still matching
+a placeholder from `.env.github.example`, because a wrong secret fails at
+deploy time in ways a missing one does not, and it skips names outside the
+registry so a typo cannot quietly become a secret.
+
+[ENVIRONMENT.md](../ENVIRONMENT.md) is the single table of names; the script's
+arrays and `.env.github.example` are kept in step with it.
+
+### D-25 · The secret/variable split follows what a log may show
+
+Credentials are secrets. Values that are public by nature — a service URL, a
+port, an account-scoped id like `HYPERDRIVE_ID` — are plain Actions variables,
+because a masked value is painful to debug and masking buys nothing for a value
+that is already public.
+
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` is the deliberate exception: it is inlined into
+the browser bundle, so it is not private, but it is stored as a secret anyway.
+Masking a key in CI logs costs nothing and a workflow reads it identically.
+
+### D-26 · `HOSTINGER_*` names are new, and scoped to deployment
+
+Rule 4 of the Session 01 spec bars inventing env var names. These are added on
+an explicit later request to deploy from GitHub to Hostinger, and they are
+confined to the deploy surface — no application code reads them. Both plan
+shapes are registered (`_FTP_*` for shared hosting, `_SSH_*` for a VPS); the
+sync script skips whichever group is left blank.
