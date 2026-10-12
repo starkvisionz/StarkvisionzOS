@@ -6,5 +6,8 @@ dist-ssr
 .vite
 *.tsbuildinfo
 .env
+.env.*
+!.env.example
+!.env.github.example
 server/data
 
